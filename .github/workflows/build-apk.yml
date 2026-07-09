@@ -29,8 +29,32 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Scaffold Flutter project (creates android/ ios/ if missing)
+      - name: Scaffold Flutter project (creates android/ if missing)
         run: flutter create --project-name entwined_memories --org com.entwinedmemories . --platforms android
+
+      - name: Upgrade Kotlin version to 1.9.22 (fixes shared_preferences compat)
+        run: |
+          if [ -f android/build.gradle ]; then
+            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/" android/build.gradle
+            echo "✅ Kotlin version patched:"
+            grep "kotlin_version" android/build.gradle
+          fi
+
+      - name: Upgrade Gradle wrapper to 8.4 (required for Kotlin 1.9.x)
+        run: |
+          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+            sed -i "s|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-all.zip|" android/gradle/wrapper/gradle-wrapper.properties
+            echo "✅ Gradle wrapper patched:"
+            cat android/gradle/wrapper/gradle-wrapper.properties
+          fi
+
+      - name: Upgrade Android Gradle Plugin to 8.1.0
+        run: |
+          if [ -f android/build.gradle ]; then
+            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.1.0/" android/build.gradle
+            echo "✅ AGP version patched:"
+            grep "com.android.tools.build" android/build.gradle
+          fi
 
       - name: Get dependencies
         run: flutter pub get

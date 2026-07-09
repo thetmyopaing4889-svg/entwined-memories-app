@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 
@@ -12,12 +13,6 @@ class MemoryCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
   });
-
-  Color get _creatorColor {
-    return memory.createdBy == 'Mom'
-        ? const Color(0xFFFFB6C1) // soft pink for Mom
-        : const Color(0xFFB4C9E8); // soft blue for Dad
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,22 +35,19 @@ class MemoryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image placeholder
-            ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              child: Container(
-                height: 200,
-                width: double.infinity,
-                color: const Color(0xFFFFF0F3),
-                child: const Center(
-                  child: Icon(
-                    Icons.photo_camera_outlined,
-                    size: 48,
-                    color: Color(0xFFE8A0B4),
-                  ),
+            // Image — only show if path exists and file is valid
+            if (memory.imageUrl != null)
+              ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+                child: Image.file(
+                  File(memory.imageUrl!),
+                  height: 200,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),
-            ),
 
             // Content
             Padding(
@@ -94,42 +86,43 @@ class MemoryCard extends StatelessWidget {
 
                   const SizedBox(height: 10),
 
-                  // Note text
+                  // Note text — improved line height for Myanmar text
                   Text(
                     memory.note,
                     style: const TextStyle(
                       fontSize: 15,
                       color: Color(0xFF3D2C33),
-                      height: 1.5,
+                      height: 1.75,
+                      letterSpacing: 0.1,
                     ),
                   ),
 
                   const SizedBox(height: 12),
 
-                  // Created by badge
+                  // "Added by" badge — darker, more readable
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: _creatorColor.withOpacity(0.2),
+                      color: const Color(0xFFFFE0E8),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.person_outline,
                           size: 13,
-                          color: _creatorColor.withOpacity(0.8),
+                          color: Color(0xFFB05070),
                         ),
                         const SizedBox(width: 4),
                         Text(
                           'Added by ${memory.createdBy}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 12,
-                            color: _creatorColor.withOpacity(0.9),
+                            color: Color(0xFF8B3A52), // darker, more readable
                             fontWeight: FontWeight.w600,
                           ),
                         ),

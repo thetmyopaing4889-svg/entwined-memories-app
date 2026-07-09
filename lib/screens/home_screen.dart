@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../services/memory_service.dart';
@@ -106,7 +107,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFE0E8),
                       borderRadius: BorderRadius.circular(12),
@@ -146,8 +148,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     Container(
                       width: 96,
                       height: 96,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFE0E8),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFFE0E8),
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
@@ -248,7 +250,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(Icons.edit_outlined, color: Color(0xFFE8A0B4)),
+              leading:
+                  const Icon(Icons.edit_outlined, color: Color(0xFFE8A0B4)),
               title: const Text('Edit Memory'),
               onTap: () {
                 Navigator.pop(context);
@@ -281,10 +284,11 @@ class _HomeScreenState extends State<HomeScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Delete Memory?'),
-        content: const Text(
-            'This memory will be permanently removed.'),
+        content:
+            const Text('This memory will be permanently removed.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -322,10 +326,11 @@ class _ChildProfileHeader extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFFFFE0E8),
-              border: Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
+              border:
+                  Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
             ),
-            child: const Icon(Icons.child_care, size: 36,
-                color: Color(0xFFE8A0B4)),
+            child: const Icon(Icons.child_care,
+                size: 36, color: Color(0xFFE8A0B4)),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -344,8 +349,8 @@ class _ChildProfileHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFFE0E8),
                     borderRadius: BorderRadius.circular(12),
@@ -478,20 +483,23 @@ class _MemoryDetailSheet extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              height: 200,
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF0F3),
-                borderRadius: BorderRadius.circular(20),
+            // Image — only show when available
+            if (memory.imageUrl != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.file(
+                    File(memory.imageUrl!),
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
               ),
-              child: const Center(
-                child: Icon(Icons.photo_camera_outlined,
-                    size: 48, color: Color(0xFFE8A0B4)),
-              ),
-            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -516,7 +524,8 @@ class _MemoryDetailSheet extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 16,
                       color: Color(0xFF3D2C33),
-                      height: 1.6,
+                      height: 1.75,
+                      letterSpacing: 0.1,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -531,7 +540,7 @@ class _MemoryDetailSheet extends StatelessWidget {
                       'Added by ${memory.createdBy}',
                       style: const TextStyle(
                         fontSize: 13,
-                        color: Color(0xFFB0889A),
+                        color: Color(0xFF8B3A52),
                         fontWeight: FontWeight.w600,
                       ),
                     ),

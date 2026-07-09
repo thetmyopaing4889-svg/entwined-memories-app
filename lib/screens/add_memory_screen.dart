@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../models/memory.dart';
 import '../services/memory_service.dart';
@@ -12,18 +14,65 @@ class AddMemoryScreen extends StatefulWidget {
 
 class _AddMemoryScreenState extends State<AddMemoryScreen> {
   final _noteController = TextEditingController();
+  final _nameController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
   String _selectedMood = '😊';
-  String _selectedCreator = 'Mom';
+  String? _pickedImagePath;
   bool _isSaving = false;
+  int _noteLength = 0;
 
   static const _moods = ['😊', '😍', '🥹', '😄', '🥰', '😌', '🎉', '💕'];
-  static const _creators = ['Mom', 'Dad'];
+  static const int _maxNote = 500;
+
+  @override
+  void initState() {
+    super.initState();
+    _noteController.addListener(() {
+      setState(() => _noteLength = _noteController.text.length);
+    });
+    _loadSavedName();
+  }
+
+  Future<void> _loadSavedName() async {
+    final saved = await MemoryService.loadCreatorName();
+    if (saved.isNotEmpty && mounted) {
+      setState(() => _nameController.text = saved);
+    }
+  }
 
   @override
   void dispose() {
     _noteController.dispose();
+    _nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+        maxWidth: 1200,
+      );
+      if (picked != null && mounted) {
+        setState(() => _pickedImagePath = picked.path);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open gallery. Check app permissions.'),
+            backgroundColor: Color(0xFFE8A0B4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  void _removeImage() {
+    setState(() => _pickedImagePath = null);
   }
 
   Future<void> _pickDate() async {
@@ -46,6 +95,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   Future<void> _saveMemory() async {
     final note = _noteController.text.trim();
+    final name = _nameController.text.trim();
+
     if (note.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -56,21 +107,35 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       );
       return;
     }
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter your name (e.g. Mom or Dad).'),
+          backgroundColor: Color(0xFFE8A0B4),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     setState(() => _isSaving = true);
+
+    // Persist name for next time
+    await MemoryService.saveCreatorName(name);
 
     final memory = Memory(
       id: const Uuid().v4(),
       note: note,
       date: _selectedDate,
-      createdBy: _selectedCreator,
+      createdBy: name,
       mood: _selectedMood,
+      imageUrl: _pickedImagePath,
     );
 
     await MemoryService.addMemory(memory);
 
     if (mounted) {
-      Navigator.pop(context, memory); // return the saved memory
+      Navigator.pop(context, memory);
     }
   }
 
@@ -115,56 +180,106 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image placeholder (Phase 3 will add real upload)
-            GestureDetector(
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Photo upload coming in Phase 3!'),
-                    backgroundColor: Color(0xFFE8A0B4),
-                    behavior: SnackBarBehavior.floating,
+            // ── Photo section ──────────────────────────────────────────────
+            if (_pickedImagePath != null) ...[
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Image.file(
+                      File(_pickedImagePath!),
+                      height: 200,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
                   ),
-                );
-              },
-              child: Container(
-                height: 180,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFE8EF),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: const Color(0xFFE8A0B4).withOpacity(0.4),
-                    width: 1.5,
-                    style: BorderStyle.solid,
-                  ),
-                ),
-                child: const Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.add_photo_alternate_outlined,
-                        size: 40, color: Color(0xFFE8A0B4)),
-                    SizedBox(height: 8),
-                    Text(
-                      'Add Photo',
-                      style: TextStyle(
-                        color: Color(0xFFB0889A),
-                        fontWeight: FontWeight.w500,
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: _removeImage,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close,
+                            color: Colors.white, size: 18),
                       ),
                     ),
-                    SizedBox(height: 4),
-                    Text(
-                      '(coming soon)',
-                      style: TextStyle(
-                          color: Color(0xFFB0889A), fontSize: 11),
+                  ),
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: _pickImage,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.swap_horiz,
+                                color: Colors.white, size: 16),
+                            SizedBox(width: 4),
+                            Text('Change',
+                                style: TextStyle(
+                                    color: Colors.white, fontSize: 12)),
+                          ],
+                        ),
+                      ),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+            ] else ...[
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  height: 160,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFE8EF),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFFE8A0B4).withOpacity(0.4),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined,
+                          size: 38, color: Color(0xFFE8A0B4)),
+                      SizedBox(height: 8),
+                      Text(
+                        'Add Photo (optional)',
+                        style: TextStyle(
+                          color: Color(0xFFB0889A),
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'Tap to pick from gallery',
+                        style: TextStyle(
+                            color: Color(0xFFCCA8B8), fontSize: 11),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
 
             const SizedBox(height: 24),
 
-            // Note input
+            // ── Note input ────────────────────────────────────────────────
             _SectionLabel(label: '📝 Memory Note'),
             const SizedBox(height: 8),
             Container(
@@ -179,23 +294,55 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                   ),
                 ],
               ),
-              child: TextField(
-                controller: _noteController,
-                maxLines: 5,
-                maxLength: 500,
-                decoration: const InputDecoration(
-                  hintText: 'What happened today? Write your memory here...',
-                  hintStyle: TextStyle(color: Color(0xFFCCA8B8), fontSize: 14),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(16),
-                  counterStyle: TextStyle(color: Color(0xFFCCA8B8)),
-                ),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _noteController,
+                    maxLines: 6,
+                    maxLength: _maxNote,
+                    buildCounter: (_, {required currentLength,
+                        required isFocused, maxLength}) =>
+                        null, // hide default counter
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.7,
+                      color: Color(0xFF3D2C33),
+                    ),
+                    decoration: const InputDecoration(
+                      hintText:
+                          'What happened today? Write your memory here...',
+                      hintStyle:
+                          TextStyle(color: Color(0xFFCCA8B8), fontSize: 14),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    ),
+                  ),
+                  // Custom character counter
+                  Padding(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          '$_noteLength / $_maxNote',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _noteLength > 450
+                                ? Colors.redAccent
+                                : const Color(0xFFCCA8B8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
 
             const SizedBox(height: 24),
 
-            // Date picker
+            // ── Date picker ───────────────────────────────────────────────
             _SectionLabel(label: '📅 Date'),
             const SizedBox(height: 8),
             GestureDetector(
@@ -242,7 +389,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // Mood selector
+            // ── Mood selector ─────────────────────────────────────────────
             _SectionLabel(label: '😊 Mood'),
             const SizedBox(height: 10),
             Wrap(
@@ -257,9 +404,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFFFFE0E8)
-                          : Colors.white,
+                      color:
+                          selected ? const Color(0xFFFFE0E8) : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: selected
@@ -286,74 +432,56 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // Created by
+            // ── Added by (custom name) ────────────────────────────────────
             _SectionLabel(label: '👤 Added by'),
-            const SizedBox(height: 10),
-            Row(
-              children: _creators.map((creator) {
-                final selected = _selectedCreator == creator;
-                final color = creator == 'Mom'
-                    ? const Color(0xFFFFB6C1)
-                    : const Color(0xFFB4C9E8);
-                return Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: GestureDetector(
-                    onTap: () =>
-                        setState(() => _selectedCreator = creator),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? color.withOpacity(0.25)
-                            : Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: selected ? color : Colors.transparent,
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withOpacity(0.15),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            creator == 'Mom'
-                                ? Icons.favorite
-                                : Icons.sports_soccer,
-                            size: 16,
-                            color: color,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            creator,
-                            style: TextStyle(
-                              color: selected
-                                  ? const Color(0xFF3D2C33)
-                                  : const Color(0xFFB0889A),
-                              fontWeight: selected
-                                  ? FontWeight.w700
-                                  : FontWeight.w500,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+            const SizedBox(height: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFE8A0B4).withOpacity(0.1),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
                   ),
-                );
-              }).toList(),
+                ],
+              ),
+              child: TextField(
+                controller: _nameController,
+                maxLength: 30,
+                buildCounter: (_, {required currentLength,
+                    required isFocused, maxLength}) =>
+                    null,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: Color(0xFF3D2C33),
+                  fontWeight: FontWeight.w500,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'e.g. Mom, Dad, Grandma...',
+                  hintStyle:
+                      TextStyle(color: Color(0xFFCCA8B8), fontSize: 14),
+                  prefixIcon: Icon(Icons.person_outline,
+                      color: Color(0xFFE8A0B4), size: 20),
+                  border: InputBorder.none,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Padding(
+              padding: EdgeInsets.only(left: 4),
+              child: Text(
+                'Your name is saved automatically for next time',
+                style: TextStyle(fontSize: 11, color: Color(0xFFCCA8B8)),
+              ),
             ),
 
             const SizedBox(height: 40),
 
-            // Save button
+            // ── Save button ───────────────────────────────────────────────
             SizedBox(
               width: double.infinity,
               height: 56,

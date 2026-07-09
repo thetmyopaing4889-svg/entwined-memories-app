@@ -3,6 +3,7 @@ import '../models/memory.dart';
 
 class MemoryService {
   static const String _storageKey = 'entwined_memories';
+  static const String _creatorNameKey = 'entwined_creator_name';
 
   /// Load all memories from local storage, sorted newest first
   static Future<List<Memory>> loadMemories() async {
@@ -44,6 +45,18 @@ class MemoryService {
     final list = await loadMemories();
     list.removeWhere((m) => m.id == id);
     await prefs.setString(_storageKey, Memory.listToJson(list));
+  }
+
+  /// Load the saved creator name (returns empty string if not set)
+  static Future<String> loadCreatorName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_creatorNameKey) ?? '';
+  }
+
+  /// Save creator name so it persists across sessions
+  static Future<void> saveCreatorName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_creatorNameKey, name);
   }
 
   /// Clear all memories (for testing)

@@ -42,8 +42,11 @@ jobs:
           echo ""
           echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
           cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
+          echo ""
+          echo "=== android/app/src/main/AndroidManifest.xml ==="
+          cat android/app/src/main/AndroidManifest.xml || echo "(not found)"
 
-      - name: Patch Kotlin & Gradle versions (Python - handles both old and new Flutter templates)
+      - name: Patch Kotlin, Gradle versions + image_picker permissions
         run: |
           python3 << 'EOF'
           import re, os
@@ -100,6 +103,34 @@ jobs:
                'gradle wrapper URL'),
           ])
 
+          # AndroidManifest.xml — add image_picker permissions if missing
+          manifest_path = 'android/app/src/main/AndroidManifest.xml'
+          if os.path.exists(manifest_path):
+              with open(manifest_path, 'r') as f:
+                  manifest = f.read()
+
+              permissions = [
+                  'android.permission.READ_MEDIA_IMAGES',
+                  'android.permission.READ_EXTERNAL_STORAGE',
+              ]
+              for perm in permissions:
+                  tag = f'<uses-permission android:name="{perm}"/>'
+                  if perm not in manifest:
+                      # Insert before <application tag
+                      manifest = manifest.replace(
+                          '<application',
+                          f'{tag}\n    <application',
+                          1
+                      )
+                      print(f"  [AndroidManifest] Added {perm}")
+                  else:
+                      print(f"  [AndroidManifest] Already has {perm}")
+
+              with open(manifest_path, 'w') as f:
+                  f.write(manifest)
+          else:
+              print(f"  SKIP (not found): {manifest_path}")
+
           print("\nDone patching.")
           EOF
 
@@ -110,6 +141,9 @@ jobs:
           echo ""
           echo "=== PATCHED android/settings.gradle ==="
           cat android/settings.gradle || echo "(not found)"
+          echo ""
+          echo "=== PATCHED AndroidManifest.xml ==="
+          cat android/app/src/main/AndroidManifest.xml || echo "(not found)"
 
       - name: Get dependencies
         run: flutter pub get

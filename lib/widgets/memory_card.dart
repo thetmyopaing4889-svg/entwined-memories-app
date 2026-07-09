@@ -76,7 +76,7 @@ class MemoryCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            memory.date,
+                            memory.formattedDate,
                             style: const TextStyle(
                               fontSize: 12,
                               color: Color(0xFFB0889A),

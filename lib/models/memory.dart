@@ -1,7 +1,9 @@
+import 'dart:convert';
+
 class Memory {
   final String id;
   final String note;
-  final String date;
+  final DateTime date;
   final String createdBy;
   final String mood;
   final String? imageUrl;
@@ -14,50 +16,40 @@ class Memory {
     required this.mood,
     this.imageUrl,
   });
-}
 
-// Dummy data for Phase 1 testing
-final List<Memory> dummyMemories = [
-  Memory(
-    id: '1',
-    note: 'First smile today! My heart melted completely. 💕',
-    date: 'July 9, 2026',
-    createdBy: 'Mom',
-    mood: '😍',
-  ),
-  Memory(
-    id: '2',
-    note: 'Took first steps in the living room. We were so proud!',
-    date: 'June 28, 2026',
-    createdBy: 'Dad',
-    mood: '🥹',
-  ),
-  Memory(
-    id: '3',
-    note: 'Said "mama" for the first time this morning.',
-    date: 'June 15, 2026',
-    createdBy: 'Mom',
-    mood: '😊',
-  ),
-  Memory(
-    id: '4',
-    note: 'Bath time giggles — the best sound in the whole world.',
-    date: 'June 5, 2026',
-    createdBy: 'Dad',
-    mood: '😄',
-  ),
-  Memory(
-    id: '5',
-    note: 'First visit to grandma\'s house. She held the baby for hours.',
-    date: 'May 20, 2026',
-    createdBy: 'Mom',
-    mood: '🥰',
-  ),
-  Memory(
-    id: '6',
-    note: 'Watched rain together through the window. So calm and peaceful.',
-    date: 'May 10, 2026',
-    createdBy: 'Dad',
-    mood: '😌',
-  ),
-];
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'note': note,
+        'date': date.toIso8601String(),
+        'createdBy': createdBy,
+        'mood': mood,
+        'imageUrl': imageUrl,
+      };
+
+  factory Memory.fromJson(Map<String, dynamic> json) => Memory(
+        id: json['id'] as String,
+        note: json['note'] as String,
+        date: DateTime.parse(json['date'] as String),
+        createdBy: json['createdBy'] as String,
+        mood: json['mood'] as String,
+        imageUrl: json['imageUrl'] as String?,
+      );
+
+  static List<Memory> listFromJson(String jsonStr) {
+    final list = jsonDecode(jsonStr) as List<dynamic>;
+    return list.map((e) => Memory.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static String listToJson(List<Memory> memories) {
+    return jsonEncode(memories.map((m) => m.toJson()).toList());
+  }
+
+  /// Formatted date string for display
+  String get formattedDate {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+}

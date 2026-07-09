@@ -1,9 +1,62 @@
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
+import '../services/memory_service.dart';
 import '../widgets/memory_card.dart';
+import 'add_memory_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<Memory> _memories = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMemories();
+  }
+
+  Future<void> _loadMemories() async {
+    setState(() => _isLoading = true);
+    final memories = await MemoryService.loadMemories();
+    if (mounted) {
+      setState(() {
+        _memories = memories;
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _openAddMemory() async {
+    final result = await Navigator.push<Memory>(
+      context,
+      MaterialPageRoute(builder: (_) => const AddMemoryScreen()),
+    );
+    if (result != null) {
+      setState(() {
+        _memories.insert(0, result);
+      });
+    }
+  }
+
+  Future<void> _deleteMemory(String id) async {
+    await MemoryService.deleteMemory(id);
+    setState(() => _memories.removeWhere((m) => m.id == id));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Memory deleted.'),
+          backgroundColor: Color(0xFFE8A0B4),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -17,14 +70,11 @@ class HomeScreen extends StatelessWidget {
             backgroundColor: const Color(0xFFFFF5F7),
             flexibleSpace: FlexibleSpaceBar(
               collapseMode: CollapseMode.pin,
-              background: _ChildProfileHeader(),
+              background: const _ChildProfileHeader(),
             ),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
-              child: Container(
-                height: 1,
-                color: const Color(0xFFFFE0E8),
-              ),
+              child: Container(height: 1, color: const Color(0xFFFFE0E8)),
             ),
             actions: [
               IconButton(
@@ -40,7 +90,7 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
 
-          // Timeline label
+          // Timeline label + count
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
@@ -62,7 +112,7 @@ class HomeScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      '${dummyMemories.length}',
+                      '${_memories.length}',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -75,44 +125,85 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
 
-          // Memory timeline feed
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final memory = dummyMemories[index];
-                return MemoryCard(
-                  memory: memory,
-                  onTap: () {
-                    _showMemoryDetail(context, memory);
-                  },
-                  onLongPress: () {
-                    _showMemoryOptions(context, memory);
-                  },
-                );
-              },
-              childCount: dummyMemories.length,
-            ),
-          ),
+          // Loading state
+          if (_isLoading)
+            const SliverFillRemaining(
+              child: Center(
+                child: CircularProgressIndicator(
+                  color: Color(0xFFE8A0B4),
+                  strokeWidth: 2.5,
+                ),
+              ),
+            )
 
-          // Bottom padding
+          // Empty state
+          else if (_memories.isEmpty)
+            SliverFillRemaining(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 96,
+                      height: 96,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFE0E8),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.auto_stories_outlined,
+                        size: 44,
+                        color: Color(0xFFE8A0B4),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'No memories yet',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF3D2C33),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Tap the button below to add\nyour first memory ✨',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFFB0889A),
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+
+          // Memory list
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final memory = _memories[index];
+                  return MemoryCard(
+                    memory: memory,
+                    onTap: () => _showMemoryDetail(context, memory),
+                    onLongPress: () => _showMemoryOptions(context, memory),
+                  );
+                },
+                childCount: _memories.length,
+              ),
+            ),
+
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),
 
-      // Bottom navigation bar
-      bottomNavigationBar: _BottomNav(),
+      bottomNavigationBar: const _BottomNav(),
 
-      // Floating Add Button
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Add Memory — coming in Phase 2!'),
-              backgroundColor: Color(0xFFE8A0B4),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        },
+        onPressed: _openAddMemory,
         backgroundColor: const Color(0xFFE8A0B4),
         foregroundColor: Colors.white,
         elevation: 4,
@@ -159,12 +250,25 @@ class HomeScreen extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.edit_outlined, color: Color(0xFFE8A0B4)),
               title: const Text('Edit Memory'),
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Edit coming soon!'),
+                    backgroundColor: Color(0xFFE8A0B4),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text('Delete Memory', style: TextStyle(color: Colors.redAccent)),
-              onTap: () => Navigator.pop(context),
+              title: const Text('Delete Memory',
+                  style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(context);
+                _confirmDelete(context, memory.id);
+              },
             ),
             const SizedBox(height: 8),
           ],
@@ -172,10 +276,39 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+
+  void _confirmDelete(BuildContext context, String id) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Memory?'),
+        content: const Text(
+            'This memory will be permanently removed.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFFB0889A))),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _deleteMemory(id);
+            },
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Child Profile Header ──────────────────────────────────────────────────────
 class _ChildProfileHeader extends StatelessWidget {
+  const _ChildProfileHeader();
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -183,7 +316,6 @@ class _ChildProfileHeader extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
       child: Row(
         children: [
-          // Avatar
           Container(
             width: 72,
             height: 72,
@@ -192,11 +324,8 @@ class _ChildProfileHeader extends StatelessWidget {
               color: const Color(0xFFFFE0E8),
               border: Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
             ),
-            child: const Icon(
-              Icons.child_care,
-              size: 36,
-              color: Color(0xFFE8A0B4),
-            ),
+            child: const Icon(Icons.child_care, size: 36,
+                color: Color(0xFFE8A0B4)),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -214,29 +343,25 @@ class _ChildProfileHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFE0E8),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Text(
-                        '🎂 1 year 2 months',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFFB0889A),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFE0E8),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    '🎂 1 year 2 months',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFB0889A),
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
+                  ),
                 ),
               ],
             ),
           ),
-          // Play button
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFFFFE0E8),
@@ -258,20 +383,22 @@ class _ChildProfileHeader extends StatelessWidget {
 
 // ── Bottom Navigation ─────────────────────────────────────────────────────────
 class _BottomNav extends StatelessWidget {
+  const _BottomNav();
+
   @override
   Widget build(BuildContext context) {
     return BottomAppBar(
       color: Colors.white,
       elevation: 8,
-      shadowColor: const Color(0xFFE8A0B4).withOpacity(0.3),
+      shadowColor: const Color(0xFFE8A0B4),
       notchMargin: 8,
       shape: const CircularNotchedRectangle(),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
+        children: const [
           _NavItem(icon: Icons.home_filled, label: 'Home', selected: true),
           _NavItem(icon: Icons.child_care, label: 'Profile'),
-          const SizedBox(width: 56), // FAB notch space
+          SizedBox(width: 56),
           _NavItem(icon: Icons.play_circle_outline, label: 'Playback'),
           _NavItem(icon: Icons.settings_outlined, label: 'Settings'),
         ],
@@ -293,7 +420,8 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? const Color(0xFFE8A0B4) : const Color(0xFFB0889A);
+    final color =
+        selected ? const Color(0xFFE8A0B4) : const Color(0xFFB0889A);
     return InkWell(
       onTap: () {},
       borderRadius: BorderRadius.circular(12),
@@ -309,7 +437,8 @@ class _NavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 color: color,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                fontWeight:
+                    selected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
           ],
@@ -349,20 +478,16 @@ class _MemoryDetailSheet extends StatelessWidget {
                 ),
               ),
             ),
-            // Image placeholder
             Container(
-              height: 240,
+              height: 200,
               margin: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: const Color(0xFFFFF0F3),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Center(
-                child: Icon(
-                  Icons.photo_camera_outlined,
-                  size: 56,
-                  color: Color(0xFFE8A0B4),
-                ),
+                child: Icon(Icons.photo_camera_outlined,
+                    size: 48, color: Color(0xFFE8A0B4)),
               ),
             ),
             Padding(
@@ -374,14 +499,15 @@ class _MemoryDetailSheet extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        memory.date,
+                        memory.formattedDate,
                         style: const TextStyle(
                           fontSize: 13,
                           color: Color(0xFFB0889A),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      Text(memory.mood, style: const TextStyle(fontSize: 28)),
+                      Text(memory.mood,
+                          style: const TextStyle(fontSize: 28)),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -395,7 +521,8 @@ class _MemoryDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFE0E8),
                       borderRadius: BorderRadius.circular(20),

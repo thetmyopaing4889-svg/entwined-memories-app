@@ -32,29 +32,84 @@ jobs:
       - name: Scaffold Flutter project (creates android/ if missing)
         run: flutter create --project-name entwined_memories --org com.entwinedmemories . --platforms android
 
-      - name: Upgrade Kotlin version to 1.9.22 (fixes shared_preferences compat)
+      - name: Debug - Show generated android files
         run: |
-          if [ -f android/build.gradle ]; then
-            sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.22'/" android/build.gradle
-            echo "✅ Kotlin version patched:"
-            grep "kotlin_version" android/build.gradle
-          fi
+          echo "=== android/build.gradle ==="
+          cat android/build.gradle || echo "(not found)"
+          echo ""
+          echo "=== android/settings.gradle ==="
+          cat android/settings.gradle || echo "(not found)"
+          echo ""
+          echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
+          cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
 
-      - name: Upgrade Gradle wrapper to 8.4 (required for Kotlin 1.9.x)
+      - name: Patch Kotlin & Gradle versions (Python - handles both old and new Flutter templates)
         run: |
-          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
-            sed -i "s|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-all.zip|" android/gradle/wrapper/gradle-wrapper.properties
-            echo "✅ Gradle wrapper patched:"
-            cat android/gradle/wrapper/gradle-wrapper.properties
-          fi
+          python3 << 'EOF'
+          import re, os
 
-      - name: Upgrade Android Gradle Plugin to 8.1.0
+          TARGET_KOTLIN = '1.9.22'
+          TARGET_GRADLE = 'https://services.gradle.org/distributions/gradle-8.6-all.zip'
+          TARGET_AGP    = '8.3.0'
+
+          def patch_file(path, patterns):
+              if not os.path.exists(path):
+                  print(f"  SKIP (not found): {path}")
+                  return False
+              with open(path, 'r') as f:
+                  original = f.read()
+              result = original
+              for old_pat, new_str, label in patterns:
+                  result, n = re.subn(old_pat, new_str, result)
+                  print(f"  [{path}] {label}: {'PATCHED' if n else 'no match'}")
+              if result != original:
+                  with open(path, 'w') as f:
+                      f.write(result)
+              return True
+
+          # Old-style build.gradle (Flutter < 3.19)
+          patch_file('android/build.gradle', [
+              (r"ext\.kotlin_version\s*=\s*['\"][\d.]+['\"]",
+               f"ext.kotlin_version = '{TARGET_KOTLIN}'",
+               'kotlin_version'),
+              (r"com\.android\.tools\.build:gradle:[\d.]+",
+               f"com.android.tools.build:gradle:{TARGET_AGP}",
+               'AGP version'),
+          ])
+
+          # New-style settings.gradle (Flutter >= 3.19)
+          patch_file('android/settings.gradle', [
+              (r'(id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+")[^"]+(")',
+               rf'\g<1>{TARGET_KOTLIN}\g<2>',
+               'kotlin plugin version'),
+              (r'(id\s+"com\.android\.application"\s+version\s+")[^"]+(")',
+               rf'\g<1>{TARGET_AGP}\g<2>',
+               'AGP plugin version'),
+              (r"(id\s+'org\.jetbrains\.kotlin\.android'\s+version\s+')[^']+(')",
+               rf'\g<1>{TARGET_KOTLIN}\g<2>',
+               'kotlin plugin version (single quotes)'),
+              (r"(id\s+'com\.android\.application'\s+version\s+')[^']+(')",
+               rf'\g<1>{TARGET_AGP}\g<2>',
+               'AGP plugin version (single quotes)'),
+          ])
+
+          # Gradle wrapper
+          patch_file('android/gradle/wrapper/gradle-wrapper.properties', [
+              (r'distributionUrl=.*',
+               f'distributionUrl={TARGET_GRADLE}',
+               'gradle wrapper URL'),
+          ])
+
+          print("\nDone patching.")
+          EOF
+
+      - name: Debug - Show patched files
         run: |
-          if [ -f android/build.gradle ]; then
-            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.1.0/" android/build.gradle
-            echo "✅ AGP version patched:"
-            grep "com.android.tools.build" android/build.gradle
-          fi
+          echo "=== PATCHED android/build.gradle ==="
+          cat android/build.gradle || echo "(not found)"
+          echo ""
+          echo "=== PATCHED android/settings.gradle ==="
+          cat android/settings.gradle || echo "(not found)"
 
       - name: Get dependencies
         run: flutter pub get

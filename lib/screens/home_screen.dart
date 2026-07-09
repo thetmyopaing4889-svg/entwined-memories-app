@@ -16,7 +16,7 @@ class HomeScreen extends StatelessWidget {
             expandedHeight: 160,
             backgroundColor: const Color(0xFFFFF5F7),
             flexibleSpace: FlexibleSpaceBar(
-              collapseMode: CollapseMode.fade,
+              collapseMode: CollapseMode.pin,
               background: _ChildProfileHeader(),
             ),
             bottom: PreferredSize(

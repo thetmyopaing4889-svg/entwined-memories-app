@@ -38,10 +38,10 @@ class EntwinedMemoriesApp extends StatelessWidget {
           ),
           iconTheme: IconThemeData(color: Color(0xFF3D2C33)),
         ),
-        cardTheme: CardThemeData(
+        cardTheme: const CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.all(Radius.circular(20)),
           ),
           color: Colors.white,
         ),

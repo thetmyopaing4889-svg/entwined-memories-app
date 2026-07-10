@@ -6,7 +6,8 @@ class Memory {
   final DateTime date;
   final String createdBy;
   final String mood;
-  final String? imageUrl; // Firebase Storage download URL (https://...)
+  final String? imageUrl; // Cloudinary URL
+  final String? videoId;  // YouTube video ID
 
   Memory({
     required this.id,
@@ -15,18 +16,21 @@ class Memory {
     required this.createdBy,
     required this.mood,
     this.imageUrl,
+    this.videoId,
   });
 
-  /// Serialize to Firestore document fields
+  bool get hasVideo => videoId != null && videoId!.isNotEmpty;
+  bool get hasImage => imageUrl != null && imageUrl!.isNotEmpty;
+
   Map<String, dynamic> toMap() => {
         'note': note,
         'date': Timestamp.fromDate(date),
         'createdBy': createdBy,
         'mood': mood,
         'imageUrl': imageUrl,
+        'videoId': videoId,
       };
 
-  /// Deserialize from a Firestore document snapshot
   factory Memory.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
     return Memory(
@@ -36,10 +40,10 @@ class Memory {
       createdBy: data['createdBy'] as String? ?? '',
       mood: data['mood'] as String? ?? '😊',
       imageUrl: data['imageUrl'] as String?,
+      videoId: data['videoId'] as String?,
     );
   }
 
-  /// Formatted date string for display
   String get formattedDate {
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',

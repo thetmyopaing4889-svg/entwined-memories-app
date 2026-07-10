@@ -1,7 +1,13 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'firebase_options.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   runApp(const EntwinedMemoriesApp());
 }
 
@@ -16,7 +22,7 @@ class EntwinedMemoriesApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFFFB6C1), // soft pink
+          seedColor: const Color(0xFFFFB6C1),
           brightness: Brightness.light,
         ).copyWith(
           primary: const Color(0xFFE8A0B4),

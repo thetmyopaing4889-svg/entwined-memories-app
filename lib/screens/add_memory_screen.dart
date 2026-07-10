@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -21,11 +22,17 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   final _nameController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
   String _selectedMood = '😊';
-  String? _pickedImagePath;
+
+  /// Holds either a local file path (new pick) or a Firebase Storage URL
+  /// (existing memory). Null = no image.
+  String? _imagePath;
+
   bool _isSaving = false;
   int _noteLength = 0;
 
   bool get _isEditing => widget.memory != null;
+  bool get _hasLocalFile =>
+      _imagePath != null && !_imagePath!.startsWith('http');
 
   static const _moods = ['😊', '😍', '🥹', '😄', '🥰', '😌', '🎉', '💕'];
   static const int _maxNote = 500;
@@ -34,17 +41,15 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   void initState() {
     super.initState();
     _noteController.addListener(
-      () => setState(() => _noteLength = _noteController.text.length),
-    );
+        () => setState(() => _noteLength = _noteController.text.length));
 
     if (_isEditing) {
-      // Pre-fill all fields from existing memory
       final m = widget.memory!;
       _noteController.text = m.note;
       _nameController.text = m.createdBy;
       _selectedDate = m.date;
       _selectedMood = m.mood;
-      _pickedImagePath = m.imageUrl;
+      _imagePath = m.imageUrl; // existing Storage URL or null
       _noteLength = m.note.length;
     } else {
       _loadSavedName();
@@ -65,6 +70,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     super.dispose();
   }
 
+  // ── Image handling ──────────────────────────────────────────────────────
+
   Future<void> _pickImage() async {
     try {
       final picked = await ImagePicker().pickImage(
@@ -73,22 +80,26 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         maxWidth: 1200,
       );
       if (picked != null && mounted) {
-        setState(() => _pickedImagePath = picked.path);
+        setState(() => _imagePath = picked.path);
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not open gallery. Check app permissions.'),
-            backgroundColor: Color(0xFFE8A0B4),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        _showSnack('Could not open gallery. Check app permissions.');
       }
     }
   }
 
-  void _removeImage() => setState(() => _pickedImagePath = null);
+  void _removeImage() => setState(() => _imagePath = null);
+
+  /// Upload a local file to Firebase Storage and return the download URL.
+  Future<String> _uploadToStorage(String localPath) async {
+    final ref = FirebaseStorage.instance
+        .ref('memories/${const Uuid().v4()}.jpg');
+    await ref.putFile(File(localPath));
+    return await ref.getDownloadURL();
+  }
+
+  // ── Date picker ─────────────────────────────────────────────────────────
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -108,6 +119,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     if (picked != null) setState(() => _selectedDate = picked);
   }
 
+  // ── Save / Update ───────────────────────────────────────────────────────
+
   Future<void> _saveMemory() async {
     final note = _noteController.text.trim();
     final name = _nameController.text.trim();
@@ -122,385 +135,260 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     }
 
     setState(() => _isSaving = true);
-    await MemoryService.saveCreatorName(name);
 
-    if (_isEditing) {
-      // Update existing memory — keep the same id
-      final updated = Memory(
-        id: widget.memory!.id,
-        note: note,
-        date: _selectedDate,
-        createdBy: name,
-        mood: _selectedMood,
-        imageUrl: _pickedImagePath,
-      );
-      await MemoryService.updateMemory(updated);
-      if (mounted) Navigator.pop(context, updated);
-    } else {
-      // Create new memory
-      final memory = Memory(
-        id: const Uuid().v4(),
-        note: note,
-        date: _selectedDate,
-        createdBy: name,
-        mood: _selectedMood,
-        imageUrl: _pickedImagePath,
-      );
-      await MemoryService.addMemory(memory);
-      if (mounted) Navigator.pop(context, memory);
+    try {
+      // Persist creator name locally
+      await MemoryService.saveCreatorName(name);
+
+      // Upload new image if user picked a local file
+      String? finalImageUrl = _imagePath;
+      if (_hasLocalFile) {
+        finalImageUrl = await _uploadToStorage(_imagePath!);
+      }
+
+      if (_isEditing) {
+        final updated = Memory(
+          id: widget.memory!.id,
+          note: note,
+          date: _selectedDate,
+          createdBy: name,
+          mood: _selectedMood,
+          imageUrl: finalImageUrl,
+        );
+        await MemoryService.updateMemory(updated);
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        final newMemory = Memory(
+          id: const Uuid().v4(),
+          note: note,
+          date: _selectedDate,
+          createdBy: name,
+          mood: _selectedMood,
+          imageUrl: finalImageUrl,
+        );
+        await MemoryService.addMemory(newMemory);
+        if (mounted) Navigator.pop(context);
+      }
+    } catch (e) {
+      setState(() => _isSaving = false);
+      _showSnack('Something went wrong. Please try again.');
     }
   }
 
   void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: const Color(0xFFE8A0B4),
-      behavior: SnackBarBehavior.floating,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: const Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
+
+  // ── UI ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF5F7),
       appBar: AppBar(
         title: Text(_isEditing ? 'Edit Memory' : 'New Memory'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: TextButton(
-              onPressed: _isSaving ? null : _saveMemory,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Color(0xFFE8A0B4),
-                      ),
-                    )
-                  : Text(
-                      _isEditing ? 'Update' : 'Save',
-                      style: const TextStyle(
-                        color: Color(0xFFE8A0B4),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                    ),
-            ),
-          ),
-        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Photo ─────────────────────────────────────────────────────
-            if (_pickedImagePath != null) ...[
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.file(
-                      File(_pickedImagePath!),
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: GestureDetector(
-                      onTap: _removeImage,
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.55),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.close,
-                            color: Colors.white, size: 18),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 8,
-                    right: 8,
-                    child: GestureDetector(
-                      onTap: _pickImage,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.55),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.swap_horiz,
-                                color: Colors.white, size: 16),
-                            SizedBox(width: 4),
-                            Text('Change',
-                                style: TextStyle(
-                                    color: Colors.white, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ] else ...[
+            // ── Image picker ────────────────────────────────────────────
+            if (_imagePath == null)
               GestureDetector(
                 onTap: _pickImage,
                 child: Container(
-                  height: 160,
                   width: double.infinity,
+                  height: 160,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE8EF),
-                    borderRadius: BorderRadius.circular(20),
+                    color: const Color(0xFFFFE0E8),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: const Color(0xFFE8A0B4).withOpacity(0.4),
-                      width: 1.5,
-                    ),
+                        color: const Color(0xFFE8A0B4), width: 1.5),
                   ),
                   child: const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Icon(Icons.add_photo_alternate_outlined,
-                          size: 38, color: Color(0xFFE8A0B4)),
+                          size: 40, color: Color(0xFFE8A0B4)),
                       SizedBox(height: 8),
-                      Text(
-                        'Add Photo (optional)',
-                        style: TextStyle(
-                          color: Color(0xFFB0889A),
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                      ),
-                      SizedBox(height: 3),
-                      Text(
-                        'Tap to pick from gallery',
-                        style: TextStyle(
-                            color: Color(0xFFCCA8B8), fontSize: 11),
-                      ),
+                      Text('Add a photo',
+                          style: TextStyle(
+                              color: Color(0xFFB0889A),
+                              fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
-              ),
-            ],
-
-            const SizedBox(height: 24),
-
-            // ── Note ──────────────────────────────────────────────────────
-            const _SectionLabel(label: '📝 Memory Note'),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFE8A0B4).withOpacity(0.1),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: Column(
+              )
+            else
+              Stack(
                 children: [
-                  TextField(
-                    controller: _noteController,
-                    maxLines: 6,
-                    maxLength: _maxNote,
-                    buildCounter: (_, {required currentLength,
-                            required isFocused, maxLength}) =>
-                        null,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      height: 1.7,
-                      color: Color(0xFF3D2C33),
-                    ),
-                    decoration: const InputDecoration(
-                      hintText:
-                          'What happened today? Write your memory here...',
-                      hintStyle:
-                          TextStyle(color: Color(0xFFCCA8B8), fontSize: 14),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          '$_noteLength / $_maxNote',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: _noteLength > 450
-                                ? Colors.redAccent
-                                : const Color(0xFFCCA8B8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: _hasLocalFile
+                        ? Image.file(
+                            File(_imagePath!),
+                            width: double.infinity,
+                            height: 200,
+                            fit: BoxFit.cover,
+                          )
+                        : Image.network(
+                            _imagePath!,
+                            width: double.infinity,
+                            height: 200,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (_, child, progress) {
+                              if (progress == null) return child;
+                              return Container(
+                                height: 200,
+                                color: const Color(0xFFFFE0E8),
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    color: Color(0xFFE8A0B4),
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                        ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Row(
+                      children: [
+                        _iconBtn(Icons.edit, _pickImage),
+                        const SizedBox(width: 8),
+                        _iconBtn(Icons.close, _removeImage),
                       ],
                     ),
                   ),
                 ],
               ),
-            ),
 
             const SizedBox(height: 24),
 
-            // ── Date ──────────────────────────────────────────────────────
-            const _SectionLabel(label: '📅 Date'),
+            // ── Note ────────────────────────────────────────────────────
+            const _SectionLabel(label: 'Memory note'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _noteController,
+              maxLines: 5,
+              maxLength: _maxNote,
+              buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
+                  Text('$currentLength/$maxLength',
+                      style: TextStyle(
+                          color: currentLength >= _maxNote
+                              ? Colors.redAccent
+                              : const Color(0xFFB0889A),
+                          fontSize: 12)),
+              decoration: InputDecoration(
+                hintText: 'What happened today? Write in any language…',
+                hintStyle:
+                    const TextStyle(color: Color(0xFFB0889A), fontSize: 14),
+                filled: true,
+                fillColor: const Color(0xFFFFF0F3),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Added by ────────────────────────────────────────────────
+            const _SectionLabel(label: 'Added by'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                hintText: 'e.g. Mom, Dad, ပါပါ, မေမေ…',
+                hintStyle:
+                    const TextStyle(color: Color(0xFFB0889A), fontSize: 14),
+                filled: true,
+                fillColor: const Color(0xFFFFF0F3),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // ── Date ────────────────────────────────────────────────────
+            const _SectionLabel(label: 'Date'),
             const SizedBox(height: 8),
             GestureDetector(
               onTap: _pickDate,
               child: Container(
-                padding: const EdgeInsets.all(16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: const Color(0xFFFFF0F3),
                   borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFE8A0B4).withOpacity(0.1),
-                      blurRadius: 12,
-                      offset: const Offset(0, 3),
-                    ),
-                  ],
                 ),
                 child: Row(
                   children: [
                     const Icon(Icons.calendar_today_outlined,
-                        color: Color(0xFFE8A0B4), size: 20),
+                        size: 18, color: Color(0xFFE8A0B4)),
                     const SizedBox(width: 12),
                     Text(
-                      Memory(
-                        id: '',
-                        note: '',
-                        date: _selectedDate,
-                        createdBy: '',
-                        mood: '',
-                      ).formattedDate,
+                      _formatDate(_selectedDate),
                       style: const TextStyle(
-                        fontSize: 15,
-                        color: Color(0xFF3D2C33),
-                        fontWeight: FontWeight.w500,
-                      ),
+                          fontSize: 15, color: Color(0xFF3D2C33)),
                     ),
-                    const Spacer(),
-                    const Icon(Icons.chevron_right,
-                        color: Color(0xFFB0889A)),
                   ],
                 ),
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            // ── Mood ──────────────────────────────────────────────────────
-            const _SectionLabel(label: '😊 Mood'),
-            const SizedBox(height: 10),
+            // ── Mood ────────────────────────────────────────────────────
+            const _SectionLabel(label: 'Mood'),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 10,
               runSpacing: 10,
               children: _moods.map((mood) {
-                final selected = _selectedMood == mood;
+                final selected = mood == _selectedMood;
                 return GestureDetector(
                   onTap: () => setState(() => _selectedMood = mood),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
+                  child: Container(
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
                       color: selected
-                          ? const Color(0xFFFFE0E8)
-                          : Colors.white,
+                          ? const Color(0xFFFFD6E0)
+                          : const Color(0xFFFFF0F3),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFFE8A0B4)
-                            : Colors.transparent,
-                        width: 2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFFE8A0B4).withOpacity(0.1),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                      border: selected
+                          ? Border.all(
+                              color: const Color(0xFFE8A0B4), width: 2)
+                          : null,
                     ),
                     child: Center(
-                      child: Text(mood,
-                          style: const TextStyle(fontSize: 24)),
-                    ),
+                        child: Text(mood,
+                            style: const TextStyle(fontSize: 26))),
                   ),
                 );
               }).toList(),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
 
-            // ── Added by ──────────────────────────────────────────────────
-            const _SectionLabel(label: '👤 Added by'),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFE8A0B4).withOpacity(0.1),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: _nameController,
-                maxLength: 30,
-                buildCounter: (_, {required currentLength,
-                        required isFocused, maxLength}) =>
-                    null,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Color(0xFF3D2C33),
-                  fontWeight: FontWeight.w500,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'e.g. Mom, Dad, Grandma...',
-                  hintStyle:
-                      TextStyle(color: Color(0xFFCCA8B8), fontSize: 14),
-                  prefixIcon: Icon(Icons.person_outline,
-                      color: Color(0xFFE8A0B4), size: 20),
-                  border: InputBorder.none,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Padding(
-              padding: EdgeInsets.only(left: 4),
-              child: Text(
-                'Your name is saved automatically for next time',
-                style: TextStyle(fontSize: 11, color: Color(0xFFCCA8B8)),
-              ),
-            ),
-
-            const SizedBox(height: 40),
-
-            // ── Save / Update button ──────────────────────────────────────
+            // ── Save / Update button ────────────────────────────────────
             SizedBox(
               width: double.infinity,
               height: 56,
@@ -519,9 +407,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     : Text(
                         _isEditing ? 'Update Memory' : 'Save Memory',
                         style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                        ),
+                            fontSize: 17, fontWeight: FontWeight.w700),
                       ),
               ),
             ),
@@ -531,6 +417,28 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         ),
       ),
     );
+  }
+
+  Widget _iconBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
   }
 }
 

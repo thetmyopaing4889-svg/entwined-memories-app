@@ -32,6 +32,10 @@ jobs:
       - name: Scaffold Flutter project (creates android/ if missing)
         run: flutter create --project-name entwined_memories --org com.entwinedmemories . --platforms android
 
+      - name: Write google-services.json
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
       - name: Debug - Show generated android files
         run: |
           echo "=== android/build.gradle ==="
@@ -40,107 +44,135 @@ jobs:
           echo "=== android/settings.gradle ==="
           cat android/settings.gradle || echo "(not found)"
           echo ""
+          echo "=== android/app/build.gradle ==="
+          cat android/app/build.gradle || echo "(not found)"
+          echo ""
           echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
           cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
-          echo ""
-          echo "=== android/app/src/main/AndroidManifest.xml ==="
-          cat android/app/src/main/AndroidManifest.xml || echo "(not found)"
 
-      - name: Patch Kotlin, Gradle versions + image_picker permissions
+      - name: Patch Kotlin, Gradle, AGP, and Firebase plugin versions
         run: |
           python3 << 'EOF'
           import re, os
 
-          TARGET_KOTLIN = '1.9.22'
-          TARGET_GRADLE = 'https://services.gradle.org/distributions/gradle-8.6-all.zip'
-          TARGET_AGP    = '8.3.0'
+          TARGET_KOTLIN  = '1.9.22'
+          TARGET_GRADLE  = 'https://services.gradle.org/distributions/gradle-8.6-all.zip'
+          TARGET_AGP     = '8.3.0'
+          TARGET_GMS     = '4.4.2'
 
-          def patch_file(path, patterns):
+          def read(path):
               if not os.path.exists(path):
-                  print(f"  SKIP (not found): {path}")
-                  return False
+                  return None
               with open(path, 'r') as f:
-                  original = f.read()
+                  return f.read()
+
+          def write(path, content):
+              with open(path, 'w') as f:
+                  f.write(content)
+
+          def patch(path, patterns):
+              original = read(path)
+              if original is None:
+                  print(f"  SKIP (not found): {path}")
+                  return
               result = original
               for old_pat, new_str, label in patterns:
                   result, n = re.subn(old_pat, new_str, result)
                   print(f"  [{path}] {label}: {'PATCHED' if n else 'no match'}")
               if result != original:
-                  with open(path, 'w') as f:
-                      f.write(result)
-              return True
+                  write(path, result)
 
-          # Old-style build.gradle (Flutter < 3.19)
-          patch_file('android/build.gradle', [
+          # ── android/build.gradle (old-style, Flutter < 3.19) ─────────────
+          patch('android/build.gradle', [
               (r"ext\.kotlin_version\s*=\s*['\"][\d.]+['\"]",
-               f"ext.kotlin_version = '{TARGET_KOTLIN}'",
-               'kotlin_version'),
+               f"ext.kotlin_version = '{TARGET_KOTLIN}'", 'kotlin_version'),
               (r"com\.android\.tools\.build:gradle:[\d.]+",
-               f"com.android.tools.build:gradle:{TARGET_AGP}",
-               'AGP version'),
+               f"com.android.tools.build:gradle:{TARGET_AGP}", 'AGP version'),
           ])
 
-          # New-style settings.gradle (Flutter >= 3.19)
-          patch_file('android/settings.gradle', [
-              (r'(id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+")[^"]+(")',
-               rf'\g<1>{TARGET_KOTLIN}\g<2>',
-               'kotlin plugin version'),
-              (r'(id\s+"com\.android\.application"\s+version\s+")[^"]+(")',
-               rf'\g<1>{TARGET_AGP}\g<2>',
-               'AGP plugin version'),
-              (r"(id\s+'org\.jetbrains\.kotlin\.android'\s+version\s+')[^']+(')",
-               rf'\g<1>{TARGET_KOTLIN}\g<2>',
-               'kotlin plugin version (single quotes)'),
-              (r"(id\s+'com\.android\.application'\s+version\s+')[^']+(')",
-               rf'\g<1>{TARGET_AGP}\g<2>',
-               'AGP plugin version (single quotes)'),
-          ])
+          # ── android/settings.gradle (new-style, Flutter >= 3.19) ─────────
+          settings = read('android/settings.gradle')
+          if settings is not None:
+              # Patch Kotlin and AGP versions
+              settings, n1 = re.subn(
+                  r'(id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+")[^"]+(")',
+                  rf'\g<1>{TARGET_KOTLIN}\g<2>', settings)
+              settings, n2 = re.subn(
+                  r'(id\s+"com\.android\.application"\s+version\s+")[^"]+(")',
+                  rf'\g<1>{TARGET_AGP}\g<2>', settings)
+              settings, n3 = re.subn(
+                  r"(id\s+'org\.jetbrains\.kotlin\.android'\s+version\s+')[^']+(')",
+                  rf'\g<1>{TARGET_KOTLIN}\g<2>', settings)
+              settings, n4 = re.subn(
+                  r"(id\s+'com\.android\.application'\s+version\s+')[^']+(')",
+                  rf'\g<1>{TARGET_AGP}\g<2>', settings)
+              print(f"  [settings.gradle] kotlin: {'PATCHED' if n1+n3 else 'no match'}, AGP: {'PATCHED' if n2+n4 else 'no match'}")
 
-          # Gradle wrapper
-          patch_file('android/gradle/wrapper/gradle-wrapper.properties', [
+              # Add google-services plugin if not already there
+              gms_plugin = f'    id "com.google.gms.google-services" version "{TARGET_GMS}" apply false'
+              if 'com.google.gms.google-services' not in settings:
+                  # Insert before the closing brace of the plugins block
+                  settings = re.sub(
+                      r'(plugins\s*\{[^}]*?)(^\})',
+                      rf'\1{gms_plugin}\n\2',
+                      settings, flags=re.MULTILINE | re.DOTALL)
+                  print('  [settings.gradle] google-services plugin: ADDED')
+              else:
+                  # Update version if already present
+                  settings = re.sub(
+                      r'(id\s+"com\.google\.gms\.google-services"\s+version\s+")[^"]+(")',
+                      rf'\g<1>{TARGET_GMS}\g<2>', settings)
+                  print('  [settings.gradle] google-services plugin: EXISTS (version checked)')
+              write('android/settings.gradle', settings)
+
+          # ── android/app/build.gradle — apply google-services plugin ──────
+          app_gradle = read('android/app/build.gradle')
+          if app_gradle is not None:
+              if 'com.google.gms.google-services' not in app_gradle:
+                  # Add plugin inside the plugins {} block
+                  app_gradle = re.sub(
+                      r'(plugins\s*\{[^}]*?)(^\})',
+                      r'\1    id "com.google.gms.google-services"\n\2',
+                      app_gradle, flags=re.MULTILINE | re.DOTALL)
+                  print('  [app/build.gradle] google-services apply: ADDED')
+              else:
+                  print('  [app/build.gradle] google-services apply: EXISTS')
+              write('android/app/build.gradle', app_gradle)
+
+          # ── Gradle wrapper ────────────────────────────────────────────────
+          patch('android/gradle/wrapper/gradle-wrapper.properties', [
               (r'distributionUrl=.*',
-               f'distributionUrl={TARGET_GRADLE}',
-               'gradle wrapper URL'),
+               f'distributionUrl={TARGET_GRADLE}', 'gradle wrapper URL'),
           ])
 
-          # AndroidManifest.xml — add image_picker permissions if missing
+          # ── AndroidManifest.xml — image_picker permissions ────────────────
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
-          if os.path.exists(manifest_path):
-              with open(manifest_path, 'r') as f:
-                  manifest = f.read()
-
-              permissions = [
-                  'android.permission.READ_MEDIA_IMAGES',
-                  'android.permission.READ_EXTERNAL_STORAGE',
-              ]
-              for perm in permissions:
+          manifest = read(manifest_path)
+          if manifest is not None:
+              for perm in ['android.permission.READ_MEDIA_IMAGES',
+                           'android.permission.READ_EXTERNAL_STORAGE',
+                           'android.permission.INTERNET']:
                   tag = f'<uses-permission android:name="{perm}"/>'
                   if perm not in manifest:
-                      # Insert before <application tag
                       manifest = manifest.replace(
-                          '<application',
-                          f'{tag}\n    <application',
-                          1
-                      )
-                      print(f"  [AndroidManifest] Added {perm}")
+                          '<application', f'{tag}\n    <application', 1)
+                      print(f'  [AndroidManifest] Added {perm}')
                   else:
-                      print(f"  [AndroidManifest] Already has {perm}")
-
-              with open(manifest_path, 'w') as f:
-                  f.write(manifest)
+                      print(f'  [AndroidManifest] Already has {perm}')
+              write(manifest_path, manifest)
           else:
-              print(f"  SKIP (not found): {manifest_path}")
+              print(f'  SKIP (not found): {manifest_path}')
 
           print("\nDone patching.")
           EOF
 
       - name: Debug - Show patched files
         run: |
-          echo "=== PATCHED android/build.gradle ==="
-          cat android/build.gradle || echo "(not found)"
-          echo ""
           echo "=== PATCHED android/settings.gradle ==="
           cat android/settings.gradle || echo "(not found)"
+          echo ""
+          echo "=== PATCHED android/app/build.gradle ==="
+          cat android/app/build.gradle || echo "(not found)"
           echo ""
           echo "=== PATCHED AndroidManifest.xml ==="
           cat android/app/src/main/AndroidManifest.xml || echo "(not found)"

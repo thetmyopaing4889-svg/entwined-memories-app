@@ -1,17 +1,16 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 
 class MemoryCard extends StatelessWidget {
   final Memory memory;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const MemoryCard({
     super.key,
     required this.memory,
-    this.onTap,
-    this.onLongPress,
+    required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -19,37 +18,48 @@ class MemoryCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       onLongPress: onLongPress,
-      child: Container(
+      child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFE8A0B4).withOpacity(0.15),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image — only show if path exists and file is valid
+            // ── Image (only if present) ───────────────────────────────────
             if (memory.imageUrl != null)
               ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(20)),
-                child: Image.file(
-                  File(memory.imageUrl!),
-                  height: 200,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+                child: Image.network(
+                  memory.imageUrl!,
                   width: double.infinity,
+                  height: 200,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  loadingBuilder: (_, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      height: 200,
+                      color: const Color(0xFFFFE0E8),
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFE8A0B4),
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (_, __, ___) => Container(
+                    height: 200,
+                    color: const Color(0xFFFFE0E8),
+                    child: const Icon(
+                      Icons.broken_image_outlined,
+                      color: Color(0xFFE8A0B4),
+                      size: 48,
+                    ),
+                  ),
                 ),
               ),
 
-            // Content
+            // ── Content ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -59,34 +69,20 @@ class MemoryCard extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.calendar_today_outlined,
-                            size: 14,
-                            color: Color(0xFFB0889A),
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            memory.formattedDate,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFFB0889A),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
                       Text(
-                        memory.mood,
-                        style: const TextStyle(fontSize: 20),
+                        memory.formattedDate,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFB0889A),
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
+                      Text(memory.mood, style: const TextStyle(fontSize: 22)),
                     ],
                   ),
-
                   const SizedBox(height: 10),
 
-                  // Note text — improved line height for Myanmar text
+                  // Note text
                   Text(
                     memory.note,
                     style: const TextStyle(
@@ -95,11 +91,12 @@ class MemoryCard extends StatelessWidget {
                       height: 1.75,
                       letterSpacing: 0.1,
                     ),
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
                   ),
-
                   const SizedBox(height: 12),
 
-                  // "Added by" badge — darker, more readable
+                  // "Added by" badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -122,7 +119,7 @@ class MemoryCard extends StatelessWidget {
                           'Added by ${memory.createdBy}',
                           style: const TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF8B3A52), // darker, more readable
+                            color: Color(0xFF8B3A52),
                             fontWeight: FontWeight.w600,
                           ),
                         ),

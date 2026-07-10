@@ -45,6 +45,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _openEditMemory(Memory memory) async {
+    final updated = await Navigator.push<Memory>(
+      context,
+      MaterialPageRoute(builder: (_) => AddMemoryScreen(memory: memory)),
+    );
+    if (updated != null) {
+      setState(() {
+        final i = _memories.indexWhere((m) => m.id == updated.id);
+        if (i != -1) _memories[i] = updated;
+        // Re-sort newest first in case date changed
+        _memories.sort((a, b) => b.date.compareTo(a.date));
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Memory updated ✨'),
+            backgroundColor: Color(0xFFE8A0B4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _deleteMemory(String id) async {
     await MemoryService.deleteMemory(id);
     setState(() => _memories.removeWhere((m) => m.id == id));
@@ -255,13 +279,7 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('Edit Memory'),
               onTap: () {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Edit coming soon!'),
-                    backgroundColor: Color(0xFFE8A0B4),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                _openEditMemory(memory);
               },
             ),
             ListTile(

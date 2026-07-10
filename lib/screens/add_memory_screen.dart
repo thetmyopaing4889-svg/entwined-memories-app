@@ -6,7 +6,11 @@ import '../models/memory.dart';
 import '../services/memory_service.dart';
 
 class AddMemoryScreen extends StatefulWidget {
-  const AddMemoryScreen({super.key});
+  /// Pass an existing [memory] to enter edit mode.
+  /// Leave null to create a new memory.
+  final Memory? memory;
+
+  const AddMemoryScreen({super.key, this.memory});
 
   @override
   State<AddMemoryScreen> createState() => _AddMemoryScreenState();
@@ -21,16 +25,30 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   bool _isSaving = false;
   int _noteLength = 0;
 
+  bool get _isEditing => widget.memory != null;
+
   static const _moods = ['😊', '😍', '🥹', '😄', '🥰', '😌', '🎉', '💕'];
   static const int _maxNote = 500;
 
   @override
   void initState() {
     super.initState();
-    _noteController.addListener(() {
-      setState(() => _noteLength = _noteController.text.length);
-    });
-    _loadSavedName();
+    _noteController.addListener(
+      () => setState(() => _noteLength = _noteController.text.length),
+    );
+
+    if (_isEditing) {
+      // Pre-fill all fields from existing memory
+      final m = widget.memory!;
+      _noteController.text = m.note;
+      _nameController.text = m.createdBy;
+      _selectedDate = m.date;
+      _selectedMood = m.mood;
+      _pickedImagePath = m.imageUrl;
+      _noteLength = m.note.length;
+    } else {
+      _loadSavedName();
+    }
   }
 
   Future<void> _loadSavedName() async {
@@ -49,8 +67,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   Future<void> _pickImage() async {
     try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
+      final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
         imageQuality: 80,
         maxWidth: 1200,
@@ -58,7 +75,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       if (picked != null && mounted) {
         setState(() => _pickedImagePath = picked.path);
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -71,9 +88,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     }
   }
 
-  void _removeImage() {
-    setState(() => _pickedImagePath = null);
-  }
+  void _removeImage() => setState(() => _pickedImagePath = null);
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -83,9 +98,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       lastDate: DateTime.now(),
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
-          colorScheme: Theme.of(context).colorScheme.copyWith(
-                primary: const Color(0xFFE8A0B4),
-              ),
+          colorScheme: Theme.of(context)
+              .colorScheme
+              .copyWith(primary: const Color(0xFFE8A0B4)),
         ),
         child: child!,
       ),
@@ -98,45 +113,50 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     final name = _nameController.text.trim();
 
     if (note.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please write something about this memory.'),
-          backgroundColor: Color(0xFFE8A0B4),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnack('Please write something about this memory.');
       return;
     }
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter your name (e.g. Mom or Dad).'),
-          backgroundColor: Color(0xFFE8A0B4),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnack('Please enter your name (e.g. Mom or Dad).');
       return;
     }
 
     setState(() => _isSaving = true);
-
-    // Persist name for next time
     await MemoryService.saveCreatorName(name);
 
-    final memory = Memory(
-      id: const Uuid().v4(),
-      note: note,
-      date: _selectedDate,
-      createdBy: name,
-      mood: _selectedMood,
-      imageUrl: _pickedImagePath,
-    );
-
-    await MemoryService.addMemory(memory);
-
-    if (mounted) {
-      Navigator.pop(context, memory);
+    if (_isEditing) {
+      // Update existing memory — keep the same id
+      final updated = Memory(
+        id: widget.memory!.id,
+        note: note,
+        date: _selectedDate,
+        createdBy: name,
+        mood: _selectedMood,
+        imageUrl: _pickedImagePath,
+      );
+      await MemoryService.updateMemory(updated);
+      if (mounted) Navigator.pop(context, updated);
+    } else {
+      // Create new memory
+      final memory = Memory(
+        id: const Uuid().v4(),
+        note: note,
+        date: _selectedDate,
+        createdBy: name,
+        mood: _selectedMood,
+        imageUrl: _pickedImagePath,
+      );
+      await MemoryService.addMemory(memory);
+      if (mounted) Navigator.pop(context, memory);
     }
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: const Color(0xFFE8A0B4),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   @override
@@ -144,7 +164,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFFFF5F7),
       appBar: AppBar(
-        title: const Text('New Memory'),
+        title: Text(_isEditing ? 'Edit Memory' : 'New Memory'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
@@ -163,9 +183,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                         color: Color(0xFFE8A0B4),
                       ),
                     )
-                  : const Text(
-                      'Save',
-                      style: TextStyle(
+                  : Text(
+                      _isEditing ? 'Update' : 'Save',
+                      style: const TextStyle(
                         color: Color(0xFFE8A0B4),
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
@@ -180,7 +200,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Photo section ──────────────────────────────────────────────
+            // ── Photo ─────────────────────────────────────────────────────
             if (_pickedImagePath != null) ...[
               Stack(
                 children: [
@@ -279,8 +299,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Note input ────────────────────────────────────────────────
-            _SectionLabel(label: '📝 Memory Note'),
+            // ── Note ──────────────────────────────────────────────────────
+            const _SectionLabel(label: '📝 Memory Note'),
             const SizedBox(height: 8),
             Container(
               decoration: BoxDecoration(
@@ -301,8 +321,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     maxLines: 6,
                     maxLength: _maxNote,
                     buildCounter: (_, {required currentLength,
-                        required isFocused, maxLength}) =>
-                        null, // hide default counter
+                            required isFocused, maxLength}) =>
+                        null,
                     style: const TextStyle(
                       fontSize: 15,
                       height: 1.7,
@@ -317,10 +337,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                       contentPadding: EdgeInsets.fromLTRB(16, 16, 16, 8),
                     ),
                   ),
-                  // Custom character counter
                   Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
@@ -342,8 +360,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Date picker ───────────────────────────────────────────────
-            _SectionLabel(label: '📅 Date'),
+            // ── Date ──────────────────────────────────────────────────────
+            const _SectionLabel(label: '📅 Date'),
             const SizedBox(height: 8),
             GestureDetector(
               onTap: _pickDate,
@@ -389,8 +407,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Mood selector ─────────────────────────────────────────────
-            _SectionLabel(label: '😊 Mood'),
+            // ── Mood ──────────────────────────────────────────────────────
+            const _SectionLabel(label: '😊 Mood'),
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
@@ -404,8 +422,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color:
-                          selected ? const Color(0xFFFFE0E8) : Colors.white,
+                      color: selected
+                          ? const Color(0xFFFFE0E8)
+                          : Colors.white,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: selected
@@ -432,8 +451,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 24),
 
-            // ── Added by (custom name) ────────────────────────────────────
-            _SectionLabel(label: '👤 Added by'),
+            // ── Added by ──────────────────────────────────────────────────
+            const _SectionLabel(label: '👤 Added by'),
             const SizedBox(height: 8),
             Container(
               decoration: BoxDecoration(
@@ -451,7 +470,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                 controller: _nameController,
                 maxLength: 30,
                 buildCounter: (_, {required currentLength,
-                    required isFocused, maxLength}) =>
+                        required isFocused, maxLength}) =>
                     null,
                 style: const TextStyle(
                   fontSize: 15,
@@ -481,7 +500,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
             const SizedBox(height: 40),
 
-            // ── Save button ───────────────────────────────────────────────
+            // ── Save / Update button ──────────────────────────────────────
             SizedBox(
               width: double.infinity,
               height: 56,
@@ -497,9 +516,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                 ),
                 child: _isSaving
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text(
-                        'Save Memory',
-                        style: TextStyle(
+                    : Text(
+                        _isEditing ? 'Update Memory' : 'Save Memory',
+                        style: const TextStyle(
                           fontSize: 17,
                           fontWeight: FontWeight.w700,
                         ),

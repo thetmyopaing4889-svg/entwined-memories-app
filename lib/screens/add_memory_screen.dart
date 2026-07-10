@@ -29,7 +29,6 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   String? _existingVideoId;
 
   bool _isSaving = false;
-  int _noteLength = 0;
   String _uploadStatus = '';
 
   bool get _isEditing => widget.memory != null;
@@ -40,9 +39,6 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   @override
   void initState() {
     super.initState();
-    _noteController
-        .addListener(() => setState(() => _noteLength = _noteController.text.length));
-
     if (_isEditing) {
       final m = widget.memory!;
       _noteController.text = m.note;
@@ -185,10 +181,12 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     } catch (e) {
       if (mounted) _showSnack('Error: $e');
     } finally {
-      if (mounted) setState(() {
-        _isSaving = false;
-        _uploadStatus = '';
-      });
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _uploadStatus = '';
+        });
+      }
     }
   }
 

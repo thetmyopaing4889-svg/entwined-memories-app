@@ -50,7 +50,7 @@ jobs:
           echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
           cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
 
-      - name: Patch Kotlin, Gradle, AGP, and Firebase plugin versions
+      - name: Patch Kotlin, Gradle, AGP, Firebase plugin, and AndroidManifest
         run: |
           python3 << 'EOF'
           import re, os
@@ -93,7 +93,6 @@ jobs:
           # ── android/settings.gradle (new-style, Flutter >= 3.19) ─────────
           settings = read('android/settings.gradle')
           if settings is not None:
-              # Patch Kotlin and AGP versions
               settings, n1 = re.subn(
                   r'(id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+")[^"]+(")',
                   rf'\g<1>{TARGET_KOTLIN}\g<2>', settings)
@@ -106,52 +105,44 @@ jobs:
               settings, n4 = re.subn(
                   r"(id\s+'com\.android\.application'\s+version\s+')[^']+(')",
                   rf'\g<1>{TARGET_AGP}\g<2>', settings)
-              print(f"  [settings.gradle] kotlin: {'PATCHED' if n1+n3 else 'no match'}, AGP: {'PATCHED' if n2+n4 else 'no match'}")
+              total = n1 + n2 + n3 + n4
+              print(f"  [settings.gradle] Kotlin+AGP patches: {total}")
 
-              # Add google-services plugin if not already there
-              gms_plugin = f'    id "com.google.gms.google-services" version "{TARGET_GMS}" apply false'
-              if 'com.google.gms.google-services' not in settings:
-                  # Insert before the closing brace of the plugins block
-                  settings = re.sub(
-                      r'(plugins\s*\{[^}]*?)(^\})',
-                      rf'\1{gms_plugin}\n\2',
-                      settings, flags=re.MULTILINE | re.DOTALL)
-                  print('  [settings.gradle] google-services plugin: ADDED')
-              else:
-                  # Update version if already present
-                  settings = re.sub(
-                      r'(id\s+"com\.google\.gms\.google-services"\s+version\s+")[^"]+(")',
-                      rf'\g<1>{TARGET_GMS}\g<2>', settings)
-                  print('  [settings.gradle] google-services plugin: EXISTS (version checked)')
+              # GMS plugin
+              settings, gms_n = re.subn(
+                  r'(id\s+["\']com\.google\.gms\.google-services["\'])\s+version\s+["\'][^"\']+["\']',
+                  rf'\g<1> version "{TARGET_GMS}"', settings)
+              print(f"  [settings.gradle] GMS plugin: {'PATCHED' if gms_n else 'no match'}")
+
               write('android/settings.gradle', settings)
 
-          # ── android/app/build.gradle — apply google-services plugin ──────
+          # ── android/app/build.gradle ──────────────────────────────────────
           app_gradle = read('android/app/build.gradle')
           if app_gradle is not None:
-              if 'com.google.gms.google-services' not in app_gradle:
-                  # Add plugin inside the plugins {} block
-                  app_gradle = re.sub(
-                      r'(plugins\s*\{[^}]*?)(^\})',
-                      r'\1    id "com.google.gms.google-services"\n\2',
-                      app_gradle, flags=re.MULTILINE | re.DOTALL)
-                  print('  [app/build.gradle] google-services apply: ADDED')
-              else:
-                  print('  [app/build.gradle] google-services apply: EXISTS')
+              app_gradle, n = re.subn(
+                  r'(com\.google\.gms:google-services:)[\d.]+',
+                  rf'\g<1>{TARGET_GMS}', app_gradle)
+              print(f"  [app/build.gradle] GMS classpath: {'PATCHED' if n else 'no match'}")
               write('android/app/build.gradle', app_gradle)
 
-          # ── Gradle wrapper ────────────────────────────────────────────────
+          # ── gradle-wrapper.properties ─────────────────────────────────────
           patch('android/gradle/wrapper/gradle-wrapper.properties', [
               (r'distributionUrl=.*',
-               f'distributionUrl={TARGET_GRADLE}', 'gradle wrapper URL'),
+               f'distributionUrl={TARGET_GRADLE}', 'gradle dist URL'),
           ])
 
-          # ── AndroidManifest.xml — image_picker permissions ────────────────
+          # ── AndroidManifest.xml ───────────────────────────────────────────
           manifest_path = 'android/app/src/main/AndroidManifest.xml'
           manifest = read(manifest_path)
           if manifest is not None:
-              for perm in ['android.permission.READ_MEDIA_IMAGES',
-                           'android.permission.READ_EXTERNAL_STORAGE',
-                           'android.permission.INTERNET']:
+              # Add permissions
+              perms = [
+                  'android.permission.INTERNET',
+                  'android.permission.READ_EXTERNAL_STORAGE',
+                  'android.permission.READ_MEDIA_IMAGES',
+                  'android.permission.READ_MEDIA_VIDEO',
+              ]
+              for perm in perms:
                   tag = f'<uses-permission android:name="{perm}"/>'
                   if perm not in manifest:
                       manifest = manifest.replace(
@@ -159,6 +150,29 @@ jobs:
                       print(f'  [AndroidManifest] Added {perm}')
                   else:
                       print(f'  [AndroidManifest] Already has {perm}')
+
+              # Add queries block for url_launcher (required Android API 30+)
+              queries_block = (
+                  '    <queries>\n'
+                  '        <intent>\n'
+                  '            <action android:name="android.intent.action.VIEW" />\n'
+                  '            <data android:scheme="https" />\n'
+                  '        </intent>\n'
+                  '        <intent>\n'
+                  '            <action android:name="android.intent.action.VIEW" />\n'
+                  '            <data android:scheme="http" />\n'
+                  '        </intent>\n'
+                  '    </queries>'
+              )
+              if '<queries>' not in manifest:
+                  manifest = manifest.replace(
+                      '</manifest>',
+                      f'{queries_block}\n</manifest>'
+                  )
+                  print('  [AndroidManifest] Added queries for url_launcher')
+              else:
+                  print('  [AndroidManifest] queries already present')
+
               write(manifest_path, manifest)
           else:
               print(f'  SKIP (not found): {manifest_path}')

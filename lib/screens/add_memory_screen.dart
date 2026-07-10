@@ -52,7 +52,6 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       } else if (m.hasImage) {
         _mediaType = _MediaType.photo;
       }
-      _noteLength = m.note.length;
     } else {
       _loadSavedName();
     }

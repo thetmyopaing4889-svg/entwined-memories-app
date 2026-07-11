@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/memory.dart';
+import '../models/child_profile.dart';
 import '../services/memory_service.dart';
+import '../services/profile_service.dart';
 import '../services/youtube_service.dart';
 import '../widgets/memory_card.dart';
 import 'add_memory_screen.dart';
@@ -256,58 +258,77 @@ class _ChildProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: const Color(0xFFFFF5F7),
-      padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
-      child: Row(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFFFFE0E8),
-              border:
-                  Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
-            ),
-            child: const Icon(Icons.child_care,
-                size: 36, color: Color(0xFFE8A0B4)),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Baby Name',
-                  style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF3D2C33),
-                      letterSpacing: -0.5),
+    return StreamBuilder<ChildProfile>(
+      stream: ProfileService.profileStream(),
+      builder: (context, snapshot) {
+        final profile = snapshot.data ?? ChildProfile.empty;
+        final name = profile.name.isNotEmpty ? profile.name : 'Baby Name';
+        final age = profile.formattedAge;
+
+        return Container(
+          color: const Color(0xFFFFF5F7),
+          padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
+          child: Row(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFFFE0E8),
+                  image: (profile.photoUrl != null &&
+                          profile.photoUrl!.isNotEmpty)
+                      ? DecorationImage(
+                          image: NetworkImage(profile.photoUrl!),
+                          fit: BoxFit.cover)
+                      : null,
+                  border:
+                      Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
                 ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFE0E8),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Text(
-                    '1 year 2 months',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF8B3A52),
-                        fontWeight: FontWeight.w600),
-                  ),
+                child: (profile.photoUrl == null || profile.photoUrl!.isEmpty)
+                    ? const Icon(Icons.child_care,
+                        size: 36, color: Color(0xFFE8A0B4))
+                    : null,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF3D2C33),
+                          letterSpacing: -0.5),
+                    ),
+                    if (age.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFE0E8),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          age,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF8B3A52),
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

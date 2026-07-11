@@ -25,10 +25,17 @@ class YouTubeService {
   }
 
   /// Upload video to YouTube (private). Returns YouTube video ID.
+  ///
+  /// [onProgress] is called with a 0.0-1.0 fraction as bytes are sent, so the
+  /// UI can show a real percentage instead of a spinner that looks stuck.
+  /// [isCancelled] is polled between chunks; if it returns true the upload
+  /// is aborted and a [YouTubeUploadCancelled] exception is thrown.
   static Future<String> uploadVideo({
     required File videoFile,
     required String title,
     required String description,
+    void Function(double progress)? onProgress,
+    bool Function()? isCancelled,
   }) async {
     final accessToken = await _getAccessToken();
     final fileSize = await videoFile.length();
@@ -65,23 +72,41 @@ class YouTubeService {
     final uploadUrl = initResponse.headers['location'];
     if (uploadUrl == null) throw Exception('Upload URL မရဘူး');
 
-    // Step 2: Upload the actual video bytes
-    final videoBytes = await videoFile.readAsBytes();
+    // Step 2: Stream the video bytes so we can report real progress and
+    // allow cancellation instead of blocking on one giant PUT body.
+    final request = http.StreamedRequest('PUT', Uri.parse(uploadUrl));
+    request.headers.addAll({
+      'Authorization': 'Bearer $accessToken',
+      'Content-Type': 'video/mp4',
+      'Content-Length': fileSize.toString(),
+    });
 
-    final uploadResponse = await http
-        .put(
-          Uri.parse(uploadUrl),
-          headers: {
-            'Authorization': 'Bearer $accessToken',
-            'Content-Type': 'video/mp4',
-            'Content-Length': fileSize.toString(),
-          },
-          body: videoBytes,
-        )
-        .timeout(const Duration(minutes: 15));
+    var sent = 0;
+    final fileStream = videoFile.openRead();
+    final subscription = fileStream.listen(
+      null,
+      onError: (e) => request.sink.addError(e),
+      onDone: () => request.sink.close(),
+      cancelOnError: true,
+    );
+    subscription.onData((chunk) {
+      if (isCancelled?.call() ?? false) {
+        subscription.cancel();
+        request.sink.addError(YouTubeUploadCancelled());
+        return;
+      }
+      request.sink.add(chunk);
+      sent += chunk.length;
+      if (fileSize > 0) onProgress?.call(sent / fileSize);
+    });
+
+    final streamedResponse =
+        await request.send().timeout(const Duration(minutes: 30));
+    final uploadResponse = await http.Response.fromStream(streamedResponse);
 
     if (uploadResponse.statusCode == 200 ||
         uploadResponse.statusCode == 201) {
+      onProgress?.call(1.0);
       final data =
           jsonDecode(uploadResponse.body) as Map<String, dynamic>;
       return data['id'] as String;
@@ -89,4 +114,10 @@ class YouTubeService {
 
     throw Exception('Video upload မအောင်မြင်ဘူး: ${uploadResponse.body}');
   }
+}
+
+/// Thrown when the caller cancels an in-progress YouTube upload.
+class YouTubeUploadCancelled implements Exception {
+  @override
+  String toString() => 'Upload ကို ပယ်ဖျက်လိုက်ပါတယ်';
 }

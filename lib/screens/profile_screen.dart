@@ -20,6 +20,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _loading = true;
   bool _saving = false;
+  String? _loadError;
 
   @override
   void initState() {
@@ -28,14 +29,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _load() async {
-    final profile = await ProfileService.loadProfile();
-    if (!mounted) return;
     setState(() {
-      _nameController.text = profile.name;
-      _birthday = profile.birthday;
-      _photoUrl = profile.photoUrl;
-      _loading = false;
+      _loading = true;
+      _loadError = null;
     });
+    try {
+      final profile = await ProfileService.loadProfile()
+          .timeout(const Duration(seconds: 15));
+      if (!mounted) return;
+      setState(() {
+        _nameController.text = profile.name;
+        _birthday = profile.birthday;
+        _photoUrl = profile.photoUrl;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _loadError = e.toString().contains('TimeoutException')
+            ? 'Network တွေးနေတယ်။ Wifi/data စစ်ပြီး ထပ်ကြိုးစားပါ။'
+            : 'Profile ဖွင့်မရဘူး: $e';
+      });
+    }
   }
 
   @override
@@ -87,13 +103,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       String? finalPhotoUrl = _photoUrl;
       if (_newPhotoFile != null) {
-        finalPhotoUrl = await CloudinaryService.uploadImage(_newPhotoFile!);
+        finalPhotoUrl = await CloudinaryService.uploadImage(_newPhotoFile!)
+            .timeout(const Duration(seconds: 60));
       }
       await ProfileService.saveProfile(ChildProfile(
         name: name,
         birthday: _birthday,
         photoUrl: finalPhotoUrl,
-      ));
+      )).timeout(const Duration(seconds: 20));
       if (mounted) {
         _showSnack('Profile သိမ်းပြီးပြီ ✨');
         setState(() {
@@ -140,7 +157,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFE8A0B4)))
-          : SingleChildScrollView(
+          : _loadError != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.wifi_off_rounded,
+                            size: 48, color: Color(0xFFB0889A)),
+                        const SizedBox(height: 16),
+                        Text(
+                          _loadError!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 15, color: Color(0xFF3D2C33)),
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton.icon(
+                          onPressed: _load,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('ထပ်ကြိုးစားမယ်'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFE8A0B4),
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [

@@ -30,6 +30,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   bool _isSaving = false;
   String _uploadStatus = '';
+  double? _uploadProgress; // null = indeterminate, 0.0-1.0 = video % done
+  bool _uploadCancelled = false;
 
   bool get _isEditing => widget.memory != null;
 
@@ -133,6 +135,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     setState(() {
       _isSaving = true;
       _uploadStatus = '';
+      _uploadProgress = null;
+      _uploadCancelled = false;
     });
 
     try {
@@ -145,14 +149,24 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           finalImageUrl = await CloudinaryService.uploadImage(_mediaFile!);
           finalVideoId = null;
         } else if (_mediaType == _MediaType.video) {
-          setState(
-              () => _uploadStatus = 'Video YouTube ကို တင်နေတယ်...\nကြာနိုင်တယ် ခဏစောင့်ပါ 🙏');
+          setState(() {
+            _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
+            _uploadProgress = 0;
+          });
           final dateStr =
               '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
           finalVideoId = await YouTubeService.uploadVideo(
             videoFile: _mediaFile!,
             title: 'Memory $dateStr',
             description: note,
+            isCancelled: () => _uploadCancelled,
+            onProgress: (p) {
+              if (!mounted) return;
+              setState(() {
+                _uploadProgress = p;
+                _uploadStatus = 'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
+              });
+            },
           );
           finalImageUrl = null;
         }
@@ -177,6 +191,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         await MemoryService.addMemory(memory);
         if (mounted) Navigator.pop(context);
       }
+    } on YouTubeUploadCancelled {
+      if (mounted) _showSnack('Upload ကို ရပ်လိုက်ပါပြီ');
     } catch (e) {
       if (mounted) _showSnack('Error: $e');
     } finally {
@@ -184,9 +200,18 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         setState(() {
           _isSaving = false;
           _uploadStatus = '';
+          _uploadProgress = null;
+          _uploadCancelled = false;
         });
       }
     }
+  }
+
+  void _cancelUpload() {
+    setState(() {
+      _uploadCancelled = true;
+      _uploadStatus = 'ရပ်နေတယ်...';
+    });
   }
 
   void _showSnack(String msg) {
@@ -221,19 +246,53 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       ),
       body: _isSaving
           ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(
-                      color: Color(0xFFE8A0B4)),
-                  const SizedBox(height: 24),
-                  Text(
-                    _uploadStatus.isEmpty ? 'သိမ်းနေတယ်...' : _uploadStatus,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        fontSize: 16, color: Color(0xFF3D2C33), height: 1.6),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_uploadProgress != null && _uploadProgress! > 0)
+                      SizedBox(
+                        width: 64,
+                        height: 64,
+                        child: CircularProgressIndicator(
+                          value: _uploadProgress!.clamp(0.0, 1.0),
+                          color: const Color(0xFFE8A0B4),
+                          backgroundColor: const Color(0xFFFFE0E8),
+                          strokeWidth: 5,
+                        ),
+                      )
+                    else
+                      const CircularProgressIndicator(
+                          color: Color(0xFFE8A0B4)),
+                    const SizedBox(height: 24),
+                    Text(
+                      _uploadStatus.isEmpty ? 'သိမ်းနေတယ်...' : _uploadStatus,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 16, color: Color(0xFF3D2C33), height: 1.6),
+                    ),
+                    if (_mediaType == _MediaType.video &&
+                        _uploadProgress != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Network နှေးရင် video upload ကြာနိုင်ပါတယ်',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                      ),
+                      const SizedBox(height: 24),
+                      if (!_uploadCancelled)
+                        OutlinedButton(
+                          onPressed: _cancelUpload,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                            side: const BorderSide(color: Colors.redAccent),
+                          ),
+                          child: const Text('ရပ်မယ်'),
+                        ),
+                    ],
+                  ],
+                ),
               ),
             )
           : SingleChildScrollView(

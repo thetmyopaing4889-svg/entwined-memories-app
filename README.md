@@ -1,4 +1,9 @@
 # entwined-memories-app
+
+📖 Read the Project Vision first:
+docs/PROJECT_VISION.md
+
+Every contributor must read this document before making any code changes.
 For My Baby
 📱 Baby Memory App – COMPLETE MASTER DOCUMENT (FINAL)
 

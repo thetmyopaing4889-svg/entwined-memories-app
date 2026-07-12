@@ -143,33 +143,48 @@ class _HomeScreenState extends State<HomeScreen> {
 
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 4),
-                  child: Row(
+                  padding: const EdgeInsets.fromLTRB(20, 36, 20, 14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '📖 Her Story',
-                        style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF3D2C33)),
+                      Row(
+                        children: [
+                          const Text(
+                            '📖 Her Story',
+                            style: TextStyle(
+                                fontSize: 21,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF3D2C33),
+                                letterSpacing: -0.3),
+                          ),
+                          const SizedBox(width: 10),
+                          if (!isLoading)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 9, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFE0E8),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${memories.length}',
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF8B3A52),
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      if (!isLoading)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFE0E8),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '${memories.length}',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF8B3A52),
-                                fontWeight: FontWeight.w600),
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Every memory, treasured forever.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[500],
+                          fontStyle: FontStyle.italic,
                         ),
+                      ),
                     ],
                   ),
                 ),

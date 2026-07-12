@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/child_profile.dart';
 import '../utils/age_calculator.dart';
 import '../utils/memory_stats.dart';
+import 'her_beginning_card.dart';
 
 /// The Home screen hero section — cover photo, child profile photo, name,
 /// emotional age copy, a minimal memory summary, and a short letter from
@@ -47,6 +48,8 @@ class HomeHero extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               _AgeBlock(birthday: profile.birthday),
+              const SizedBox(height: 24),
+              const HerBeginningCard(),
               const SizedBox(height: 22),
               _MemorySummary(stats: stats),
               const SizedBox(height: 24),

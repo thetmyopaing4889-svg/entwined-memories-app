@@ -5,11 +5,13 @@ class ChildProfile {
   final String name;
   final DateTime? birthday;
   final String? photoUrl; // Cloudinary URL
+  final String? coverPhotoUrl; // Cloudinary URL, used by the Home hero cover
 
   const ChildProfile({
     required this.name,
     this.birthday,
     this.photoUrl,
+    this.coverPhotoUrl,
   });
 
   static const empty = ChildProfile(name: '');
@@ -18,6 +20,7 @@ class ChildProfile {
         'name': name,
         'birthday': birthday != null ? Timestamp.fromDate(birthday!) : null,
         'photoUrl': photoUrl,
+        'coverPhotoUrl': coverPhotoUrl,
       };
 
   factory ChildProfile.fromMap(Map<String, dynamic>? data) {
@@ -26,6 +29,9 @@ class ChildProfile {
       name: data['name'] as String? ?? '',
       birthday: (data['birthday'] as Timestamp?)?.toDate(),
       photoUrl: data['photoUrl'] as String?,
+      // Safe for existing documents that predate this field — Firestore
+      // simply returns null for a key that was never written.
+      coverPhotoUrl: data['coverPhotoUrl'] as String?,
     );
   }
 

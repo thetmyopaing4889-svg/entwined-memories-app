@@ -5,6 +5,8 @@ import '../models/child_profile.dart';
 import '../services/memory_service.dart';
 import '../services/profile_service.dart';
 import '../services/youtube_service.dart';
+import '../utils/memory_stats.dart';
+import '../widgets/home_hero.dart';
 import '../widgets/memory_card.dart';
 import 'add_memory_screen.dart';
 
@@ -116,49 +118,36 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFFF5F7),
       body: StreamBuilder<List<Memory>>(
         stream: MemoryService.memoriesStream(),
         builder: (context, snapshot) {
           final memories = snapshot.data ?? [];
           final isLoading =
               snapshot.connectionState == ConnectionState.waiting;
+          final stats = MemoryStats.fromMemories(memories);
 
           return CustomScrollView(
             slivers: [
-              SliverAppBar(
-                pinned: true,
-                expandedHeight: 160,
-                backgroundColor: const Color(0xFFFFF5F7),
-                flexibleSpace: const FlexibleSpaceBar(
-                  collapseMode: CollapseMode.pin,
-                  background: _ChildProfileHeader(),
+              // ── Home hero: cover photo, avatar, name, age, memory
+              // summary, and today's letter. See widgets/home_hero.dart.
+              SliverToBoxAdapter(
+                child: StreamBuilder<ChildProfile>(
+                  stream: ProfileService.profileStream(),
+                  builder: (context, profileSnapshot) {
+                    final profile = profileSnapshot.data ?? ChildProfile.empty;
+                    return HomeHero(profile: profile, stats: stats);
+                  },
                 ),
-                bottom: PreferredSize(
-                  preferredSize: const Size.fromHeight(1),
-                  child: Container(
-                      height: 1, color: const Color(0xFFFFE0E8)),
-                ),
-                actions: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined),
-                    onPressed: () {},
-                    color: const Color(0xFFE8A0B4),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.more_horiz),
-                    onPressed: () {},
-                    color: const Color(0xFFE8A0B4),
-                  ),
-                ],
               ),
 
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                  padding: const EdgeInsets.fromLTRB(16, 28, 16, 4),
                   child: Row(
                     children: [
                       const Text(
-                        'Memories',
+                        '📖 Her Story',
                         style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w700,
@@ -248,87 +237,6 @@ class _HomeScreenState extends State<HomeScreen> {
             style: TextStyle(
                 color: Colors.white, fontWeight: FontWeight.w600)),
       ),
-    );
-  }
-}
-
-// ── Child Profile Header ──────────────────────────────────────────────────────
-class _ChildProfileHeader extends StatelessWidget {
-  const _ChildProfileHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<ChildProfile>(
-      stream: ProfileService.profileStream(),
-      builder: (context, snapshot) {
-        final profile = snapshot.data ?? ChildProfile.empty;
-        final name = profile.name.isNotEmpty ? profile.name : 'Baby Name';
-        final age = profile.formattedAge;
-
-        return Container(
-          color: const Color(0xFFFFF5F7),
-          padding: const EdgeInsets.fromLTRB(16, 56, 16, 16),
-          child: Row(
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFFFFE0E8),
-                  image: (profile.photoUrl != null &&
-                          profile.photoUrl!.isNotEmpty)
-                      ? DecorationImage(
-                          image: NetworkImage(profile.photoUrl!),
-                          fit: BoxFit.cover)
-                      : null,
-                  border:
-                      Border.all(color: const Color(0xFFE8A0B4), width: 2.5),
-                ),
-                child: (profile.photoUrl == null || profile.photoUrl!.isEmpty)
-                    ? const Icon(Icons.child_care,
-                        size: 36, color: Color(0xFFE8A0B4))
-                    : null,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF3D2C33),
-                          letterSpacing: -0.5),
-                    ),
-                    if (age.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFE0E8),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          age,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF8B3A52),
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

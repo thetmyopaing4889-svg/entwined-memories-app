@@ -31,7 +31,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
 
   // Bumped manually alongside debug-visibility changes so the on-screen
   // error text always shows which build produced it.
-  static const String _buildTag = '9ff543b+';
+  static const String _buildTag = '75f99e1+';
 
   @override
   void initState() {
@@ -89,28 +89,34 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
 
       debugPrint('[CreatingHome] child profile save: start');
       try {
-        await ProfileService.saveProfile(ChildProfile(
-          name: widget.data.childName,
-          birthday: widget.data.birthday,
-          photoUrl: profilePhotoUrl,
-          coverPhotoUrl: coverPhotoUrl,
-        )).timeout(const Duration(seconds: 20));
+        await _retryOnce(
+          () => ProfileService.saveProfile(ChildProfile(
+            name: widget.data.childName,
+            birthday: widget.data.birthday,
+            photoUrl: profilePhotoUrl,
+            coverPhotoUrl: coverPhotoUrl,
+          )),
+          timeout: const Duration(seconds: 60),
+        );
         debugPrint('[CreatingHome] child profile save: success');
       } catch (e) {
-        debugPrint('[CreatingHome] child profile save: FAILED — $e');
+        debugPrint('[CreatingHome] child profile save: FAILED after retry — $e');
         _errorSource = 'CreatingHomeScreen._build (child profile save / ProfileService.saveProfile)';
         rethrow;
       }
 
       debugPrint('[CreatingHome] parents save: start');
       try {
-        await ParentsService.saveParents(ParentsProfile(
-          dadName: widget.data.dadName,
-          momName: widget.data.momName,
-        )).timeout(const Duration(seconds: 20));
+        await _retryOnce(
+          () => ParentsService.saveParents(ParentsProfile(
+            dadName: widget.data.dadName,
+            momName: widget.data.momName,
+          )),
+          timeout: const Duration(seconds: 60),
+        );
         debugPrint('[CreatingHome] parents save: success');
       } catch (e) {
-        debugPrint('[CreatingHome] parents save: FAILED — $e');
+        debugPrint('[CreatingHome] parents save: FAILED after retry — $e');
         _errorSource = 'CreatingHomeScreen._build (parents save / ParentsService.saveParents)';
         rethrow;
       }
@@ -147,6 +153,23 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
       setState(() {
         _error = _debugMessageFor(e);
       });
+    }
+  }
+
+  /// Runs [action] with a generous timeout, and if it fails once (timeout
+  /// or any other error), tries exactly one more time before giving up.
+  /// Used for the Firestore save steps, which previously had a too-short
+  /// 20s timeout and no retry, so any brief connectivity hiccup surfaced
+  /// as a hard failure.
+  Future<T> _retryOnce<T>(
+    Future<T> Function() action, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      return await action().timeout(timeout);
+    } catch (e) {
+      debugPrint('[CreatingHome] first attempt failed ($e) — retrying once');
+      return await action().timeout(timeout);
     }
   }
 

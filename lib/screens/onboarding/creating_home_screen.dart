@@ -27,6 +27,11 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   String? _error;
+  String _errorSource = 'unknown';
+
+  // Bumped manually alongside debug-visibility changes so the on-screen
+  // error text always shows which build produced it.
+  static const String _buildTag = '9ff543b+';
 
   @override
   void initState() {
@@ -45,7 +50,10 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
   }
 
   Future<void> _build() async {
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _errorSource = 'unknown';
+    });
     try {
       String? profilePhotoUrl;
       String? coverPhotoUrl;
@@ -60,6 +68,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
               '[CreatingHome] profile photo upload: success ($profilePhotoUrl)');
         } catch (e) {
           debugPrint('[CreatingHome] profile photo upload: FAILED — $e');
+          _errorSource = 'CreatingHomeScreen._build (profile photo upload)';
           rethrow;
         }
       }
@@ -73,6 +82,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
               '[CreatingHome] cover photo upload: success ($coverPhotoUrl)');
         } catch (e) {
           debugPrint('[CreatingHome] cover photo upload: FAILED — $e');
+          _errorSource = 'CreatingHomeScreen._build (cover photo upload)';
           rethrow;
         }
       }
@@ -88,6 +98,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
         debugPrint('[CreatingHome] child profile save: success');
       } catch (e) {
         debugPrint('[CreatingHome] child profile save: FAILED — $e');
+        _errorSource = 'CreatingHomeScreen._build (child profile save / ProfileService.saveProfile)';
         rethrow;
       }
 
@@ -100,6 +111,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
         debugPrint('[CreatingHome] parents save: success');
       } catch (e) {
         debugPrint('[CreatingHome] parents save: FAILED — $e');
+        _errorSource = 'CreatingHomeScreen._build (parents save / ParentsService.saveParents)';
         rethrow;
       }
 
@@ -109,6 +121,7 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
         debugPrint('[CreatingHome] onboarding markComplete: success');
       } catch (e) {
         debugPrint('[CreatingHome] onboarding markComplete: FAILED — $e');
+        _errorSource = 'CreatingHomeScreen._build (onboarding markComplete / OnboardingService.markComplete)';
         rethrow;
       }
 
@@ -125,26 +138,28 @@ class _CreatingHomeScreenState extends State<CreatingHomeScreen>
     } catch (e, stack) {
       debugPrint('[CreatingHome] _build failed: $e');
       debugPrint('[CreatingHome] stack trace:\n$stack');
+      if (_errorSource == 'unknown') {
+        // Thrown by something outside the per-step try/catch blocks above
+        // (e.g. the post-delay navigation call itself).
+        _errorSource = 'CreatingHomeScreen._build (unclassified step)';
+      }
       if (!mounted) return;
       setState(() {
-        _error = _messageFor(e);
+        _error = _debugMessageFor(e);
       });
     }
   }
 
-  /// Turns a caught exception into a screen-appropriate message —
-  /// specific detail for known exception types (Firebase, Cloudinary
-  /// upload), a friendly fallback for anything else (e.g. genuine
-  /// network/timeout failures). This does not change the error UI
-  /// itself, only the text it displays.
-  String _messageFor(Object e) {
-    if (e is FirebaseException) {
-      return 'Firebase Error [${e.code}]: ${e.message ?? e.toString()}';
-    }
-    if (e.toString().contains('Cloudinary upload')) {
-      return e.toString().replaceFirst('Exception: ', '');
-    }
-    return 'မှတ်တမ်းအိမ် ပြင်ဆင်ရာမှာ အခက်အခဲရှိနေတယ်။ Network စစ်ပြီး ထပ်ကြိုးစားပါ။';
+  /// Debug-visible error text: always shows the build tag, which step
+  /// threw, and the real exception detail — no silent generic fallback.
+  /// Keeps the same on-screen widget, only the text content changes.
+  String _debugMessageFor(Object e) {
+    final detail = e is FirebaseException
+        ? 'Firebase Error [${e.code}]: ${e.message ?? e.toString()}'
+        : e.toString().replaceFirst('Exception: ', '');
+    return 'Build: $_buildTag\n'
+        'Error Source: $_errorSource\n'
+        'Error Detail: $detail';
   }
 
   @override

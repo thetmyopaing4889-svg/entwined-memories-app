@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'create_child_screen.dart';
+import 'step1_name_screen.dart';
 import 'onboarding_data.dart';
 
 /// Screen 2 — Welcome.
@@ -78,7 +78,7 @@ class WelcomeScreen extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (_) =>
-                            CreateChildScreen(data: OnboardingData()),
+                            Step1NameScreen(data: OnboardingData()),
                       ),
                     );
                   },

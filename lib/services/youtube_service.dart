@@ -59,7 +59,7 @@ class YouTubeService {
               'description': description,
               'categoryId': '22',
             },
-            'status': {'privacyStatus': 'private'},
+            'status': {'privacyStatus': 'unlisted'},
           }),
         )
         .timeout(const Duration(seconds: 30));

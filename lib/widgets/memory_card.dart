@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../services/youtube_service.dart';
@@ -103,13 +104,16 @@ class _VideoThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('[MemoryCard] _VideoThumbnail.build videoId="$videoId"');
+    final thumbnailUrl = YouTubeService.getThumbnailUrl(videoId);
+    debugPrint('[MemoryCard] _VideoThumbnail.build thumbnailUrl="$thumbnailUrl"');
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       child: Stack(
         alignment: Alignment.center,
         children: [
           Image.network(
-            YouTubeService.getThumbnailUrl(videoId),
+            thumbnailUrl,
             width: double.infinity,
             height: 200,
             fit: BoxFit.cover,

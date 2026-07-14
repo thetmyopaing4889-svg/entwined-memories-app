@@ -1,16 +1,23 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class YouTubeService {
   static const String _workerUrl =
       'https://entwined-memories.thetmyopaing4889.workers.dev';
 
-  static String getThumbnailUrl(String videoId) =>
-      'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
+  static String getThumbnailUrl(String videoId) {
+    final url = 'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
+    debugPrint('[YouTubeService] getThumbnailUrl videoId="$videoId" -> $url');
+    return url;
+  }
 
-  static String getWatchUrl(String videoId) =>
-      'https://www.youtube.com/watch?v=$videoId';
+  static String getWatchUrl(String videoId) {
+    final url = 'https://www.youtube.com/watch?v=$videoId';
+    debugPrint('[YouTubeService] getWatchUrl videoId="$videoId" -> $url');
+    return url;
+  }
 
   static Future<String> _getAccessToken() async {
     final response = await http

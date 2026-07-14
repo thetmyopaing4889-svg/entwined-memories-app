@@ -106,6 +106,7 @@ class _VideoThumbnail extends StatelessWidget {
   Widget build(BuildContext context) {
     debugPrint('[MemoryCard] _VideoThumbnail.build videoId="$videoId"');
     final thumbnailUrl = YouTubeService.getThumbnailUrl(videoId);
+    final watchUrl = YouTubeService.getWatchUrl(videoId);
     debugPrint('[MemoryCard] _VideoThumbnail.build thumbnailUrl="$thumbnailUrl"');
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
@@ -162,6 +163,33 @@ class _VideoThumbnail extends StatelessWidget {
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w700)),
+            ),
+          ),
+          // ── TEMPORARY DEBUG OVERLAY ──────────────────────────────────────
+          // Shows the raw videoId and generated URLs directly on screen so
+          // they can be read on a physical device without log access.
+          // Remove once the thumbnail 404 investigation is finished.
+          Positioned(
+            left: 4,
+            right: 4,
+            bottom: 4,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.75),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: SelectableText(
+                'DEBUG\n'
+                'videoId: $videoId\n'
+                'thumbnailUrl: $thumbnailUrl\n'
+                'watchUrl: $watchUrl',
+                style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                ),
+              ),
             ),
           ),
         ],

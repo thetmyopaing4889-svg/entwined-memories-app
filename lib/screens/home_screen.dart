@@ -262,16 +262,30 @@ class _MemoryDetailSheet extends StatelessWidget {
   const _MemoryDetailSheet({required this.memory});
 
   Future<void> _openYouTube(BuildContext context) async {
-    final url = Uri.parse(YouTubeService.getWatchUrl(memory.videoId!));
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } else {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('YouTube ဖွင့်မရဘူး'),
-          backgroundColor: Color(0xFFE8A0B4),
-        ));
+    debugPrint('[HomeScreen] Play button pressed');
+    final watchUrlString = YouTubeService.getWatchUrl(memory.videoId!);
+    debugPrint('[HomeScreen] _openYouTube watchUrl="$watchUrlString"');
+    final url = Uri.parse(watchUrlString);
+    try {
+      final canLaunch = await canLaunchUrl(url);
+      debugPrint('[HomeScreen] _openYouTube canLaunchUrl result=$canLaunch');
+      if (canLaunch) {
+        final launched =
+            await launchUrl(url, mode: LaunchMode.externalApplication);
+        debugPrint('[HomeScreen] _openYouTube launchUrl result=$launched');
+      } else {
+        debugPrint(
+            '[HomeScreen] _openYouTube canLaunchUrl returned false — showing fallback snackbar');
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('YouTube ဖွင့်မရဘူး'),
+            backgroundColor: Color(0xFFE8A0B4),
+          ));
+        }
       }
+    } catch (e, stack) {
+      debugPrint('[HomeScreen] _openYouTube EXCEPTION: $e');
+      debugPrint('[HomeScreen] _openYouTube stack trace:\n$stack');
     }
   }
 

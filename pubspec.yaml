@@ -16,8 +16,8 @@ dependencies:
   uuid: ^4.4.0
   image_picker: ^1.1.2
   http: ^1.2.1
-  url_launcher: ^6.3.0
   package_info_plus: ^8.0.0
+  youtube_player_flutter: ^9.1.1
 
 dev_dependencies:
   flutter_test:

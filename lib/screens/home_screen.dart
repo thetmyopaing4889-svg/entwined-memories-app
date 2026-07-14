@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/memory.dart';
 import '../models/child_profile.dart';
 import '../services/memory_service.dart';
@@ -9,6 +8,7 @@ import '../utils/memory_stats.dart';
 import '../widgets/home_hero.dart';
 import '../widgets/memory_card.dart';
 import 'add_memory_screen.dart';
+import 'video_player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -261,32 +261,14 @@ class _MemoryDetailSheet extends StatelessWidget {
   final Memory memory;
   const _MemoryDetailSheet({required this.memory});
 
-  Future<void> _openYouTube(BuildContext context) async {
+  void _playInApp(BuildContext context) {
     debugPrint('[HomeScreen] Play button pressed');
-    final watchUrlString = YouTubeService.getWatchUrl(memory.videoId!);
-    debugPrint('[HomeScreen] _openYouTube watchUrl="$watchUrlString"');
-    final url = Uri.parse(watchUrlString);
-    try {
-      final canLaunch = await canLaunchUrl(url);
-      debugPrint('[HomeScreen] _openYouTube canLaunchUrl result=$canLaunch');
-      if (canLaunch) {
-        final launched =
-            await launchUrl(url, mode: LaunchMode.externalApplication);
-        debugPrint('[HomeScreen] _openYouTube launchUrl result=$launched');
-      } else {
-        debugPrint(
-            '[HomeScreen] _openYouTube canLaunchUrl returned false — showing fallback snackbar');
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('YouTube ဖွင့်မရဘူး'),
-            backgroundColor: Color(0xFFE8A0B4),
-          ));
-        }
-      }
-    } catch (e, stack) {
-      debugPrint('[HomeScreen] _openYouTube EXCEPTION: $e');
-      debugPrint('[HomeScreen] _openYouTube stack trace:\n$stack');
-    }
+    final videoId = memory.videoId!;
+    debugPrint('[HomeScreen] _playInApp opening in-app player for videoId="$videoId"');
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoId: videoId)),
+    );
   }
 
   @override
@@ -333,7 +315,7 @@ class _MemoryDetailSheet extends StatelessWidget {
                             fit: BoxFit.cover,
                           ),
                           GestureDetector(
-                            onTap: () => _openYouTube(context),
+                            onTap: () => _playInApp(context),
                             child: Container(
                               width: 64,
                               height: 64,
@@ -352,7 +334,7 @@ class _MemoryDetailSheet extends StatelessWidget {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () => _openYouTube(context),
+                        onPressed: () => _playInApp(context),
                         icon: const Icon(Icons.play_circle_outline),
                         label: const Text('YouTube မှာ ကြည့်မယ်'),
                         style: ElevatedButton.styleFrom(

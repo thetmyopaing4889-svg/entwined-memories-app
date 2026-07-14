@@ -332,15 +332,18 @@ class _MemoryDetailSheet extends StatelessWidget {
                             width: double.infinity,
                             fit: BoxFit.cover,
                           ),
-                          Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.65),
-                              shape: BoxShape.circle,
+                          GestureDetector(
+                            onTap: () => _openYouTube(context),
+                            child: Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.65),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.play_arrow,
+                                  color: Colors.white, size: 36),
                             ),
-                            child: const Icon(Icons.play_arrow,
-                                color: Colors.white, size: 36),
                           ),
                         ],
                       ),

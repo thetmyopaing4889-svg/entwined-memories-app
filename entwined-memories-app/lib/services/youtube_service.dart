@@ -29,6 +29,8 @@ class YouTubeWorkerException implements Exception {
 class YouTubeService {
   static const String _workerUrl =
       'https://entwined-memories.thetmyopaing4889.workers.dev';
+  static const String _uploadPrivacyStatus = 'unlisted';
+  static const bool _uploadEmbeddable = true;
 
   static String getThumbnailUrl(String videoId) {
     final url = 'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
@@ -230,7 +232,11 @@ class YouTubeService {
               'description': description,
               'categoryId': '22',
             },
-            'status': {'privacyStatus': 'unlisted'},
+            'status': {
+              // Keep memory videos playable inside the app's YouTube embed.
+              'privacyStatus': _uploadPrivacyStatus,
+              'embeddable': _uploadEmbeddable,
+            },
           }),
         )
         .timeout(const Duration(seconds: 30));

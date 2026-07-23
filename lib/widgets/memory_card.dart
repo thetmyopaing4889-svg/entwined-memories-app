@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../services/youtube_service.dart';
@@ -26,7 +25,11 @@ class MemoryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Media preview ─────────────────────────────────────────────
-            if (memory.hasVideo) _VideoThumbnail(videoId: memory.videoId!),
+            if (memory.hasVideo)
+              _VideoThumbnail(
+                videoId: memory.videoId!,
+                processingStatus: memory.processingStatus,
+              ),
             if (!memory.hasVideo && memory.hasImage) _ImagePreview(url: memory.imageUrl!),
 
             // ── Content ───────────────────────────────────────────────────
@@ -100,14 +103,16 @@ class MemoryCard extends StatelessWidget {
 // ── YouTube video thumbnail with play button overlay ──────────────────────────
 class _VideoThumbnail extends StatelessWidget {
   final String videoId;
-  const _VideoThumbnail({required this.videoId});
+  final String? processingStatus;
+
+  const _VideoThumbnail({
+    required this.videoId,
+    required this.processingStatus,
+  });
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('[MemoryCard] _VideoThumbnail.build videoId="$videoId"');
     final thumbnailUrl = YouTubeService.getThumbnailUrl(videoId);
-    final watchUrl = YouTubeService.getWatchUrl(videoId);
-    debugPrint('[MemoryCard] _VideoThumbnail.build thumbnailUrl="$thumbnailUrl"');
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       child: Stack(
@@ -165,33 +170,29 @@ class _VideoThumbnail extends StatelessWidget {
                       fontWeight: FontWeight.w700)),
             ),
           ),
-          // ── TEMPORARY DEBUG OVERLAY ──────────────────────────────────────
-          // Shows the raw videoId and generated URLs directly on screen so
-          // they can be read on a physical device without log access.
-          // Remove once the thumbnail 404 investigation is finished.
-          Positioned(
-            left: 4,
-            right: 4,
-            bottom: 4,
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.75),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: SelectableText(
-                'DEBUG\n'
-                'videoId: $videoId\n'
-                'thumbnailUrl: $thumbnailUrl\n'
-                'watchUrl: $watchUrl',
-                style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontSize: 9,
-                  fontFamily: 'monospace',
+          if (processingStatus != null && processingStatus != 'ready')
+            Positioned(
+              left: 10,
+              bottom: 10,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.72),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  processingStatus == 'failed'
+                      ? 'Video unavailable'
+                      : 'Video processing...',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );

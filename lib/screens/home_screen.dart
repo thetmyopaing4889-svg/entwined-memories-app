@@ -262,9 +262,14 @@ class _MemoryDetailSheet extends StatelessWidget {
   const _MemoryDetailSheet({required this.memory});
 
   void _playInApp(BuildContext context) {
-    debugPrint('[HomeScreen] Play button pressed');
+    if (!memory.isVideoReady) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Video အဆင်သင့်ဖြစ်အောင် processing လုပ်နေတယ်'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     final videoId = memory.videoId!;
-    debugPrint('[HomeScreen] _playInApp opening in-app player for videoId="$videoId"');
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoId: videoId)),
@@ -315,7 +320,9 @@ class _MemoryDetailSheet extends StatelessWidget {
                             fit: BoxFit.cover,
                           ),
                           GestureDetector(
-                            onTap: () => _playInApp(context),
+                           onTap: memory.isVideoReady
+                               ? () => _playInApp(context)
+                               : null,
                             child: Container(
                               width: 64,
                               height: 64,
@@ -334,7 +341,9 @@ class _MemoryDetailSheet extends StatelessWidget {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () => _playInApp(context),
+                        onPressed: memory.isVideoReady
+                            ? () => _playInApp(context)
+                            : null,
                         icon: const Icon(Icons.play_circle_outline),
                         label: const Text('YouTube မှာ ကြည့်မယ်'),
                         style: ElevatedButton.styleFrom(

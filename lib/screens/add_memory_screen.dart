@@ -24,6 +24,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   String _selectedMood = '😊';
 
   File? _mediaFile;
+  String? _mediaMimeType;
   _MediaType _mediaType = _MediaType.none;
   String? _existingImageUrl;
   String? _existingVideoId;
@@ -83,6 +84,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       if (picked != null && mounted) {
         setState(() {
           _mediaFile = File(picked.path);
+          _mediaMimeType = null;
           _mediaType = _MediaType.photo;
           _existingImageUrl = null;
           _existingVideoId = null;
@@ -102,6 +104,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       if (picked != null && mounted) {
         setState(() {
           _mediaFile = File(picked.path);
+          _mediaMimeType = picked.mimeType;
           _mediaType = _MediaType.video;
           _existingImageUrl = null;
           _existingVideoId = null;
@@ -114,6 +117,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   void _removeMedia() => setState(() {
         _mediaFile = null;
+        _mediaMimeType = null;
         _mediaType = _MediaType.none;
         _existingImageUrl = null;
         _existingVideoId = null;
@@ -142,12 +146,14 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     try {
       String? finalImageUrl = _existingImageUrl;
       String? finalVideoId = _existingVideoId;
+      String? finalProcessingStatus = widget.memory?.processingStatus;
 
       if (_mediaFile != null) {
         if (_mediaType == _MediaType.photo) {
           setState(() => _uploadStatus = 'ဓာတ်ပုံ Cloudinary ကို တင်နေတယ်...');
           finalImageUrl = await CloudinaryService.uploadImage(_mediaFile!);
           finalVideoId = null;
+          finalProcessingStatus = null;
         } else if (_mediaType == _MediaType.video) {
           setState(() {
             _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
@@ -155,10 +161,11 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           });
           final dateStr =
               '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-          finalVideoId = await YouTubeService.uploadVideo(
+          final finalVideo = await YouTubeService.uploadVideo(
             videoFile: _mediaFile!,
             title: 'Memory $dateStr',
             description: note,
+            mimeType: _mediaMimeType,
             isCancelled: () => _uploadCancelled,
             onProgress: (p) {
               if (!mounted) return;
@@ -168,6 +175,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
               });
             },
           );
+          finalVideoId = finalVideo.videoId;
+          finalProcessingStatus = finalVideo.processingStatus;
           finalImageUrl = null;
         }
       }
@@ -182,6 +191,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         mood: _selectedMood,
         imageUrl: finalImageUrl,
         videoId: finalVideoId,
+        processingStatus: finalProcessingStatus,
       );
 
       if (_isEditing) {

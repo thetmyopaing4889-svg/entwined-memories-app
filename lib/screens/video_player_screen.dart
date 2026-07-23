@@ -21,14 +21,24 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _hasError = false;
+  bool _showPlayFallback = true;
+
+  Uri _embedUri({required bool autoplay}) {
+    return Uri.https(
+      'www.youtube.com',
+      '/embed/${widget.videoId}',
+      <String, String>{
+        'autoplay': autoplay ? '1' : '0',
+        'playsinline': '1',
+        'controls': '1',
+        'rel': '0',
+      },
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-
-    final embedUrl =
-        'https://www.youtube.com/embed/${widget.videoId}'
-        '?autoplay=1&playsinline=1&controls=1&rel=0';
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -47,11 +57,32 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           onWebResourceError: (error) {
             debugPrint(
                 '[VideoPlayerScreen] WebView error: ${error.description}');
-            if (mounted) setState(() { _isLoading = false; _hasError = true; });
+            // YouTube pages load analytics, images, and other secondary
+            // resources. Only a failed main frame means the player itself
+            // failed to load.
+            if (error.isForMainFrame != true) return;
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+                _hasError = true;
+              });
+            }
           },
         ),
       )
-      ..loadRequest(Uri.parse(embedUrl));
+      ..loadRequest(_embedUri(autoplay: true));
+  }
+
+  Future<void> _playFromUserGesture() async {
+    if (!mounted) return;
+    setState(() {
+      _showPlayFallback = false;
+      _isLoading = true;
+      _hasError = false;
+    });
+    // Reloading after a real tap gives Android WebView permission to start
+    // media when autoplay was blocked on the first navigation.
+    await _controller.loadRequest(_embedUri(autoplay: true));
   }
 
   @override
@@ -110,8 +141,32 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 ),
               ),
             )
-          else
+          else ...[
             WebViewWidget(controller: _controller),
+            if (_showPlayFallback && !_isLoading)
+              Center(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _playFromUserGesture,
+                    borderRadius: BorderRadius.circular(40),
+                    child: Ink(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.72),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 48,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
 
           // Loading indicator
           if (_isLoading && !_hasError)

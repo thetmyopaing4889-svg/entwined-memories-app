@@ -29,6 +29,17 @@ class MemoryService {
     await _col.doc(updated.id).update(updated.toMap());
   }
 
+  /// Update only the asynchronous YouTube processing state.
+  ///
+  /// Keeping this as a field update avoids overwriting a memory's note or
+  /// media metadata when a background status poll completes.
+  static Future<void> updateProcessingStatus(
+      String memoryId, String processingStatus) async {
+    await _col.doc(memoryId).update({
+      'processingStatus': processingStatus,
+    });
+  }
+
   /// Delete a memory from Firestore by id
   static Future<void> deleteMemory(String id) async {
     await _col.doc(id).delete();

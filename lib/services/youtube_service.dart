@@ -148,6 +148,49 @@ class YouTubeService {
     return accessToken;
   }
 
+  /// Ask the Worker for YouTube's current processing state for one video.
+  ///
+  /// The Worker owns the OAuth refresh token, so the mobile app never needs
+  /// to receive or store Google credentials.
+  static Future<String> getVideoProcessingStatus(String videoId) async {
+    final normalizedVideoId = videoId.trim();
+    if (!RegExp(r'^[A-Za-z0-9_-]{6,20}$').hasMatch(normalizedVideoId)) {
+      throw const YouTubeWorkerException(
+        statusCode: 400,
+        message: 'YouTube video ID မမှန်ဘူး',
+      );
+    }
+
+    final response = await http
+        .post(
+          Uri.parse('$_workerUrl/video-status'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'videoId': normalizedVideoId}),
+        )
+        .timeout(const Duration(seconds: 20));
+
+    final data = _decodeObject(response.body);
+    if (response.statusCode != 200) {
+      throw YouTubeWorkerException(
+        statusCode: response.statusCode,
+        message: _apiErrorMessage(data),
+      );
+    }
+
+    final status = data['processingStatus'];
+    if (status is! String ||
+        !const {'succeeded', 'processing', 'failed'}.contains(status)) {
+      throw const YouTubeWorkerException(
+        statusCode: 502,
+        message: 'Worker က video processing status မမှန်ဘူး',
+      );
+    }
+    return status;
+  }
+
   /// Upload video to YouTube (unlisted). Returns the video ID and its initial
   /// processing state. A successful upload normally starts as `processing`;
   /// YouTube may need additional time before playback is available.

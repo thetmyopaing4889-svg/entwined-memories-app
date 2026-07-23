@@ -6,3 +6,9 @@ id = "jeCyXCFfkQ7v8hZ3d-uda"
 uri = "file://audit_report_entwined_memories.txt"
 type = "text"
 title = "Download Entwined Memories Audit Report"
+
+[[outputs]]
+id = "qnWb0afcwo75lpSE-L7eu"
+uri = "file://audit_report_entwined_memories.txt.zip"
+type = "unspecified"
+title = "Download Audit Report ZIP"

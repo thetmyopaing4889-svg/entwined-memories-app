@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../models/child_profile.dart';
@@ -18,6 +19,59 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _processingPollInterval = Duration(seconds: 12);
+  static const _processingPollTimeout = Duration(minutes: 5);
+  final Set<String> _pollingVideoIds = <String>{};
+
+  @override
+  void dispose() {
+    _pollingVideoIds.clear();
+    super.dispose();
+  }
+
+  void _startProcessingPolling(List<Memory> memories) {
+    for (final memory in memories) {
+      if (memory.processingStatus == 'processing' &&
+          memory.hasVideo &&
+          _pollingVideoIds.add(memory.videoId!)) {
+        unawaited(_pollVideoUntilComplete(memory));
+      }
+    }
+  }
+
+  Future<void> _pollVideoUntilComplete(Memory memory) async {
+    final deadline = DateTime.now().add(_processingPollTimeout);
+    try {
+      while (DateTime.now().isBefore(deadline)) {
+        try {
+          final status =
+              await YouTubeService.getVideoProcessingStatus(memory.videoId!);
+          if (status == 'succeeded') {
+            await MemoryService.updateProcessingStatus(memory.id, 'ready');
+            return;
+          }
+          if (status == 'failed') {
+            await MemoryService.updateProcessingStatus(memory.id, 'failed');
+            return;
+          }
+        } catch (_) {
+          // A temporary network/API error should not strand the memory in a
+          // permanent state. The next interval will retry within the timeout.
+        }
+
+        final remaining = deadline.difference(DateTime.now());
+        if (remaining <= Duration.zero) return;
+        await Future<void>.delayed(
+          remaining < _processingPollInterval
+              ? remaining
+              : _processingPollInterval,
+        );
+      }
+    } finally {
+      _pollingVideoIds.remove(memory.videoId);
+    }
+  }
+
   Future<void> _openAddMemory() async {
     await Navigator.push(
       context,
@@ -123,6 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
         stream: MemoryService.memoriesStream(),
         builder: (context, snapshot) {
           final memories = snapshot.data ?? [];
+          _startProcessingPolling(memories);
           final isLoading =
               snapshot.connectionState == ConnectionState.waiting;
           final stats = MemoryStats.fromMemories(memories);

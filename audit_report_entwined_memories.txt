@@ -1,0 +1,552 @@
+AUDIT REPORT — ENTWINED MEMORIES FLUTTER PROJECT
+=================================================
+
+Audit status: Complete
+Repository: thetmyopaing4889-svg/entwined-memories-app
+Branch reviewed: main
+Code changes made during audit: None
+Commits created during audit: None
+
+Source-of-truth documents reviewed:
+1. PROJECT_VISION.md
+2. PROJECT_ARCHITECTURE.md
+
+
+1. OVERALL PROJECT STRUCTURE AND STATUS
+----------------------------------------
+
+The project is a Flutter Android application for preserving private family
+memories. It is intended for one father, one mother, and one child. The
+product vision describes it as a private memory home, not a social network,
+public gallery, or generic cloud-storage application.
+
+Main modules:
+
+lib/
+  main.dart
+  firebase_options.dart
+  models/
+    child_profile.dart
+    memory.dart
+    parents_profile.dart
+  screens/
+    app_root.dart
+    main_screen.dart
+    home_screen.dart
+    add_memory_screen.dart
+    profile_screen.dart
+    playback_screen.dart
+    settings_screen.dart
+    video_player_screen.dart
+    onboarding/
+  services/
+    cloudinary_service.dart
+    memory_service.dart
+    onboarding_service.dart
+    parents_service.dart
+    profile_service.dart
+    youtube_service.dart
+  utils/
+    age_calculator.dart
+    memory_stats.dart
+  widgets/
+    her_beginning_card.dart
+    home_hero.dart
+    memory_card.dart
+
+State management:
+
+There is no dedicated state-management package. The application uses:
+
+- StatefulWidget and setState
+- Firestore snapshot streams
+- Future-based asynchronous operations
+- SharedPreferences for local onboarding completion
+- TextEditingController and in-memory screen state
+- OnboardingData to pass values between onboarding screens
+
+This is simple and reasonable for a small Version 1, but it may become hard
+to maintain when authentication, family membership, upload queues, settings,
+and playback state are added.
+
+Substantially implemented:
+
+- Flutter application shell and Firebase initialization
+- Splash and onboarding flow
+- Child name and birthday setup
+- Child profile photo and cover photo selection
+- Parent name record
+- Home screen and child age display
+- Firestore memory timeline
+- Add, edit, and delete memory
+- Date, note, mood, and creator fields
+- Cloudinary image upload
+- YouTube video upload flow
+- YouTube thumbnail display
+- In-app video player using WebView
+- Profile editing
+- Basic memory statistics
+- Basic settings screen
+- Automatic timeline refresh through Firestore snapshots
+
+Partially implemented or missing:
+
+- Google Login: missing
+- Authentication: missing
+- Family invitation: missing
+- Family ID and family membership: missing
+- Secure private family access: not implemented in code
+- Firestore security rules: not included
+- Infinite scroll: missing
+- Memory Playback/slideshow: placeholder only
+- Optional playback music: missing
+- Search: missing
+- Voice memory: missing
+- AI caption: missing
+- Reminders: missing
+- Memory export: missing
+- Photo book: missing
+- Timeline video export: missing
+- Multi-user sync: Firestore streams exist, but authenticated family users
+  and permission enforcement do not exist
+
+
+2. VIDEO FEATURE ANALYSIS
+-------------------------
+
+Current upload flow:
+
+1. The user selects a video in Flutter.
+2. Flutter calls the Cloudflare Worker at:
+   https://entwined-memories.thetmyopaing4889.workers.dev/token
+3. The Worker is expected to return an access_token.
+4. Flutter starts a resumable upload session with the YouTube API.
+5. Flutter streams the video bytes directly to Google.
+6. YouTube returns a video ID.
+7. Flutter stores the video ID in Firestore as videoId.
+
+Important architecture mismatch:
+
+PROJECT_ARCHITECTURE.md describes:
+
+  Flutter
+    -> Cloudflare Worker
+    -> YouTube Upload
+    -> Receive Video ID
+    -> Save Video ID into Firestore
+
+The actual code uses the Worker only as a token endpoint. The actual upload
+is performed directly by the Flutter app to Google:
+
+  Flutter
+    -> Cloudflare Worker only for token
+    -> Flutter directly uploads to YouTube API
+    -> Firestore
+
+Current YouTube player package:
+
+The project currently uses:
+
+  webview_flutter: ^4.10.0
+
+It does not currently use youtube_player_flutter. The latest commit replaced
+youtube_player_flutter with webview_flutter.
+
+The player loads:
+
+  https://www.youtube.com/embed/{videoId}
+    ?autoplay=1&playsinline=1&controls=1&rel=0
+
+The implementation uses WebViewController with:
+
+- JavaScript enabled
+- A custom Android mobile user-agent
+- NavigationDelegate
+- Loading state
+- Error state
+- Retry button
+
+Possible playback/rendering failure causes:
+
+1. YouTube embedding may be disabled for a video.
+2. The video may be blocked by copyright, region, age, or account rules.
+3. The video may still be processing after upload.
+4. The code saves the video ID immediately and does not check processingStatus.
+5. WebView may report an error from a non-critical subresource, while the
+   code treats any WebView resource error as a complete player failure.
+6. autoplay is not guaranteed by Android WebView or YouTube.
+7. Android platform configuration is generated only in CI and is not stored
+   in the repository, making WebView debugging harder.
+8. Video upload MIME type is hard-coded as video/mp4 even if the selected file
+   has another format.
+9. Worker response is assumed to contain a valid String access_token; there
+   is no strict response validation.
+10. The Worker source code is not in this repository, so token scopes,
+    OAuth refresh behavior, CORS, rate limits, and Worker error handling
+    cannot be audited here.
+11. Resumable upload state is not persisted. If the app is killed, the upload
+    cannot be recovered.
+12. If YouTube upload succeeds but Firestore save fails, the YouTube video
+    becomes an orphaned external asset.
+
+
+3. FIRESTORE AND DATA ARCHITECTURE
+----------------------------------
+
+Architecture expectation:
+
+  families/{familyId}/child
+  families/{familyId}/parents
+  families/{familyId}/settings
+  families/{familyId}/memories/{memoryId}
+
+Actual Firestore paths:
+
+  app_data/child_profile
+  app_data/parents
+  memories/{memoryId}
+
+This conflicts with the architecture requirement that every record belongs to
+one family and that there must never be global memories.
+
+Architecture Memory fields:
+
+  memoryId
+  familyId
+  date
+  note
+  mood
+  imageUrl
+  videoId
+  createdBy
+  createdAt
+  updatedAt
+
+Actual Memory model fields:
+
+  id
+  note
+  date
+  createdBy
+  mood
+  imageUrl
+  videoId
+
+Missing from the actual model:
+
+- familyId
+- createdAt
+- updatedAt
+
+Child profile architecture fields include childId and createdAt, but the
+actual model does not store them. The architecture calls the image field
+profilePhoto, while the code uses photoUrl.
+
+The parent record stores dadName and momName, but it is only a shared display
+record. It does not contain user IDs, roles, invitations, or permissions.
+
+
+4. DEPENDENCIES AND PACKAGES
+----------------------------
+
+Current direct dependencies:
+
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.0
+  shared_preferences: ^2.3.2
+  uuid: ^4.4.0
+  image_picker: ^1.1.2
+  http: ^1.2.1
+  package_info_plus: ^8.0.0
+  webview_flutter: ^4.10.0
+
+Firebase:
+
+- firebase_core and cloud_firestore are present.
+- firebase_auth is not present.
+- Google Sign-In is not present.
+- Firebase App Check is not present.
+- Firebase Storage is not present.
+- Firestore rules are not included.
+
+YouTube:
+
+- youtube_player_flutter is no longer present.
+- webview_flutter is used for playback.
+- No duplicate YouTube-player dependency conflict was found.
+
+Cloudinary:
+
+- No Cloudinary SDK is used.
+- Generic http multipart upload is used instead.
+- Cloudinary settings are hard-coded.
+- There is no file-size validation, retry queue, or external-media cleanup.
+
+Cloudflare Worker:
+
+- No Worker SDK is used.
+- Generic http requests are used.
+- The Worker URL and response shape are hard-coded/assumed.
+- Worker source and deployment configuration are absent.
+
+Reproducibility:
+
+No pubspec.lock file is committed. Dependency versions may therefore resolve
+differently between builds. The exact current outdated-package report could
+not be run because the Flutter SDK was not available in the audit environment.
+The project should run flutter pub outdated using the project Flutter version.
+
+
+5. ENVIRONMENT AND API CONFIGURATION
+-------------------------------------
+
+Firebase:
+
+- Firebase is initialized in main.dart using firebase_options.dart.
+- Only Android Firebase options are configured.
+- Web and other platforms are explicitly unsupported.
+- The Android Firebase API key is embedded in source code. This is normally
+  a client identifier, not a server secret, but must be restricted through
+  Firebase settings and protected by proper security rules.
+
+CI Firebase configuration:
+
+- GitHub Actions expects GOOGLE_SERVICES_JSON as a GitHub Secret.
+- The workflow creates the Android project during CI.
+- It writes the secret to android/app/google-services.json.
+- The workflow then patches Gradle and manifest files using regular
+  expressions.
+
+Cloudinary:
+
+- Cloud name is hard-coded in cloudinary_service.dart.
+- Upload preset is hard-coded in cloudinary_service.dart.
+- No environment variables are used.
+- The upload preset should be restricted by format, size, folder, and rate
+  limits.
+
+Cloudflare Worker:
+
+- Worker URL is hard-coded in youtube_service.dart.
+- No Worker source, schema, environment declaration, or token-scope document
+  exists in this repository.
+- Token expiration and response validation are not implemented.
+
+Authentication and privacy:
+
+- No authentication package exists.
+- There is no session or user identity.
+- There is no family membership.
+- There is no family ID lookup.
+- There are no security rules in the repository.
+
+The application is described as private, but the current code does not
+establish who is allowed to read or write the data.
+
+
+6. SYNTAX, BUILD, TEST, AND LOGIC FINDINGS
+------------------------------------------
+
+No definite Dart syntax error was identified by static source inspection.
+However, Flutter commands could not be run in the audit environment, so the
+following still need to be verified with the project Flutter SDK:
+
+  flutter pub get
+  flutter analyze
+  flutter test
+  flutter build apk
+
+Testing:
+
+The only test is test/widget_test.dart and it only checks:
+
+  expect(1 + 1, 2)
+
+There are no functional tests for onboarding, Firestore, media uploads,
+video playback, API responses, pagination, errors, or security behavior.
+
+Other logic findings:
+
+- PlaybackScreen is an explicit placeholder with a disabled button.
+- Timeline loads the entire memories collection and has no pagination.
+- Deleting a memory does not delete its Cloudinary image or YouTube video.
+- Replacing media during edit leaves the old external media orphaned.
+- Upload failure recovery and resume state are absent.
+- A successful external upload followed by Firestore failure creates an
+  orphaned external asset.
+- External API response payloads are not strictly validated.
+- Debug logs include video IDs and uploaded URLs and should be reduced before
+  production.
+
+
+7. SEVERITY-BASED ISSUES
+------------------------
+
+CRITICAL
+
+C1. Private family access is not implemented.
+C2. Firestore data is not scoped to a family.
+C3. Firestore security rules are absent from the repository.
+C4. Cloudflare Worker upload architecture is not actually followed.
+C5. YouTube video processing status is ignored.
+
+HIGH
+
+H1. Google Login and parent invitation are missing.
+H2. familyId is missing from the Memory model.
+H3. Firestore paths do not match the architecture.
+H4. Video MIME type is always declared as video/mp4.
+H5. WebView errors are treated too broadly.
+H6. Android configuration is generated dynamically only in CI.
+H7. External media is not cleaned up on delete or replacement.
+
+MEDIUM
+
+M1. Infinite scrolling and pagination are missing.
+M2. Upload retry/resume queue is missing.
+M3. Worker and Cloudinary response validation is weak.
+M4. pubspec.lock is not committed.
+M5. Functional test coverage is effectively absent.
+M6. createdAt and updatedAt are missing from models.
+M7. Architecture and implementation use inconsistent field names.
+M8. Upload/processing status is not stored.
+
+LOW
+
+L1. Playback feature remains visibly unfinished.
+L2. Debug logging should be reduced for production.
+L3. Firebase configuration is Android-only.
+L4. Settings and playback architecture are incomplete.
+
+
+8. RECOMMENDED STEP-BY-STEP FIX PLAN
+------------------------------------
+
+Step 1 — Authentication and privacy foundation
+
+1. Select and implement Google Login.
+2. Create stable user identities.
+3. Create the single-family record.
+4. Store family membership and roles.
+5. Add Dad/Mom invitation flow.
+6. Make every screen use the active family ID.
+
+Step 2 — Align Firestore with the architecture
+
+Move to:
+
+  families/{familyId}/child
+  families/{familyId}/parents
+  families/{familyId}/settings
+  families/{familyId}/memories/{memoryId}
+
+Add familyId, createdAt, updatedAt, stable IDs, and consistent field names.
+
+Step 3 — Add Firestore security rules
+
+Rules must enforce:
+
+- Authenticated access only
+- Family-member-only reads
+- Authorized family-member writes
+- Creator/role-based edit and delete permissions
+- No global memory access
+- No unauthenticated writes
+
+Step 4 — Document and secure the Cloudflare Worker contract
+
+Document token retrieval, OAuth scopes, expiration, errors, rate limits, and
+request validation. Preferably move the YouTube upload itself behind the
+Worker so the mobile client does not directly manage the upload token.
+
+Step 5 — Implement a complete video lifecycle
+
+Use explicit states:
+
+  uploading
+  processing
+  ready
+  failed
+
+Detect the actual MIME type, check YouTube processing status, store errors,
+and show a video only after it is ready.
+
+Step 6 — Improve WebView playback
+
+- Confirm Android Internet permission and WebView configuration.
+- Distinguish main-frame failures from non-critical resource errors.
+- Do not depend on autoplay.
+- Provide an explicit play fallback.
+- Validate video IDs.
+- Handle YouTube restrictions and processing errors separately.
+
+Step 7 — Add media cleanup
+
+Delete or track old Cloudinary and YouTube assets when memories are deleted
+or media is replaced. Use a cleanup queue if deletion is asynchronous.
+
+Step 8 — Add pagination
+
+Use a first-page limit, startAfterDocument, load-more behavior, loading
+states, empty states, and retry states.
+
+Step 9 — Implement Playback
+
+Add date-range selection, sorted memories, slideshow controls, photo/video
+handling, optional music if required, and unavailable-video handling.
+
+Step 10 — Stabilize CI and dependencies
+
+- Run flutter pub outdated.
+- Update packages safely.
+- Commit pubspec.lock.
+- Make Android configuration reproducible.
+- Validate CI secrets clearly.
+- Run flutter analyze, flutter test, and flutter build apk.
+
+Step 11 — Add real automated tests
+
+Test model serialization, age calculation, onboarding validation, API response
+parsing, upload failure handling, Firestore paths, pagination, video state
+transitions, and playback sorting.
+
+Step 12 — Remove production debug leakage
+
+Guard or remove video ID and uploaded URL logs. Do not expose token details
+or internal build information to normal users.
+
+
+FINAL CONCLUSION
+----------------
+
+The project has a functional emotional UI foundation and a basic memory
+workflow:
+
+  Onboarding
+    -> Child profile
+    -> Photo upload
+    -> Firestore memory timeline
+    -> Add/edit/delete memory
+    -> YouTube video ID storage
+    -> WebView playback
+
+The strongest completed areas are the visual direction, onboarding, child
+profile, basic Firestore timeline, photo upload, basic video upload, and
+basic video playback.
+
+The largest gaps are architectural and privacy-related:
+
+1. Authentication is missing.
+2. Family scoping is missing.
+3. Firestore paths do not match the architecture.
+4. Security rules are absent.
+5. Cloudflare Worker upload flow differs from the documented design.
+6. Video processing state is not handled.
+7. Playback is still a placeholder.
+8. Media cleanup and upload recovery are missing.
+9. Tests are only placeholders.
+10. CI and dependency resolution are not fully reproducible.
+
+The project should not be considered ready for a secure production release
+until authentication, family authorization, Firestore security, and the video
+processing lifecycle are resolved.

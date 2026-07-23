@@ -23,6 +23,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _hasError = false;
   bool _showPlayFallback = true;
 
+  static const _youtubeReferer = 'https://www.youtube.com/';
+  static const _youtubeOrigin = 'https://www.youtube.com';
+
   Uri _embedUri({required bool autoplay}) {
     return Uri.https(
       'www.youtube.com',
@@ -32,6 +35,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         'playsinline': '1',
         'controls': '1',
         'rel': '0',
+        'enablejsapi': '1',
+        'origin': _youtubeOrigin,
+      },
+    );
+  }
+
+  Future<void> _loadEmbed({required bool autoplay}) {
+    return _controller.loadRequest(
+      _embedUri(autoplay: autoplay),
+      headers: const {
+        // YouTube Error 153 is returned when an embedded player request
+        // cannot identify a valid embedding page. These headers are applied
+        // to the initial document request made by Android WebView.
+        'Referer': _youtubeReferer,
+        'Origin': _youtubeOrigin,
       },
     );
   }
@@ -70,7 +88,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           },
         ),
       )
-      ..loadRequest(_embedUri(autoplay: true));
+      ..loadRequest(
+        _embedUri(autoplay: true),
+        headers: const {
+          'Referer': _youtubeReferer,
+          'Origin': _youtubeOrigin,
+        },
+      );
   }
 
   Future<void> _playFromUserGesture() async {
@@ -82,7 +106,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
     // Reloading after a real tap gives Android WebView permission to start
     // media when autoplay was blocked on the first navigation.
-    await _controller.loadRequest(_embedUri(autoplay: true));
+    await _loadEmbed(autoplay: true);
   }
 
   @override

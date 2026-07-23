@@ -1,1 +1,2 @@
 - [YouTube processing status](youtube-processing-status.md) — YouTube upload tokens need read scope for processing-status polling; the Worker owns OAuth and the app polls through it.
+- [YouTube WebView Error 153](youtube-webview-error-153.md) — Android embeds need an explicit YouTube referrer/origin configuration in the player request.

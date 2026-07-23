@@ -1,0 +1,28 @@
+name: entwined_memories
+description: A private family memory app for capturing and sharing precious moments.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.0
+  shared_preferences: ^2.3.2
+  uuid: ^4.4.0
+  image_picker: ^1.1.2
+  http: ^1.2.1
+  package_info_plus: ^8.0.0
+  webview_flutter: ^4.10.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,216 @@
+name: Build Flutter APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Scaffold Flutter project (creates android/ if missing)
+        run: flutter create --project-name entwined_memories --org com.entwinedmemories . --platforms android
+
+      - name: Write google-services.json
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Debug - Show generated android files
+        run: |
+          echo "=== android/build.gradle ==="
+          cat android/build.gradle || echo "(not found)"
+          echo ""
+          echo "=== android/settings.gradle ==="
+          cat android/settings.gradle || echo "(not found)"
+          echo ""
+          echo "=== android/app/build.gradle ==="
+          cat android/app/build.gradle || echo "(not found)"
+          echo ""
+          echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
+          cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
+
+      - name: Patch Kotlin, Gradle, AGP, Firebase plugin, and AndroidManifest
+        run: |
+          python3 << 'EOF'
+          import re, os
+
+          TARGET_KOTLIN  = '1.9.22'
+          TARGET_GRADLE  = 'https://services.gradle.org/distributions/gradle-8.6-all.zip'
+          TARGET_AGP     = '8.3.0'
+          TARGET_GMS     = '4.4.2'
+
+          def read(path):
+              if not os.path.exists(path):
+                  return None
+              with open(path, 'r') as f:
+                  return f.read()
+
+          def write(path, content):
+              with open(path, 'w') as f:
+                  f.write(content)
+
+          def patch(path, patterns):
+              original = read(path)
+              if original is None:
+                  print(f"  SKIP (not found): {path}")
+                  return
+              result = original
+              for old_pat, new_str, label in patterns:
+                  result, n = re.subn(old_pat, new_str, result)
+                  print(f"  [{path}] {label}: {'PATCHED' if n else 'no match'}")
+              if result != original:
+                  write(path, result)
+
+          # ── android/build.gradle (old-style, Flutter < 3.19) ─────────────
+          patch('android/build.gradle', [
+              (r"ext\.kotlin_version\s*=\s*['\"][\d.]+['\"]",
+               f"ext.kotlin_version = '{TARGET_KOTLIN}'", 'kotlin_version'),
+              (r"com\.android\.tools\.build:gradle:[\d.]+",
+               f"com.android.tools.build:gradle:{TARGET_AGP}", 'AGP version'),
+          ])
+
+          # ── android/settings.gradle (new-style, Flutter >= 3.19) ─────────
+          settings = read('android/settings.gradle')
+          if settings is not None:
+              settings, n1 = re.subn(
+                  r'(id\s+"org\.jetbrains\.kotlin\.android"\s+version\s+")[^"]+(")',
+                  rf'\g<1>{TARGET_KOTLIN}\g<2>', settings)
+              settings, n2 = re.subn(
+                  r'(id\s+"com\.android\.application"\s+version\s+")[^"]+(")',
+                  rf'\g<1>{TARGET_AGP}\g<2>', settings)
+              settings, n3 = re.subn(
+                  r"(id\s+'org\.jetbrains\.kotlin\.android'\s+version\s+')[^']+(')",
+                  rf'\g<1>{TARGET_KOTLIN}\g<2>', settings)
+              settings, n4 = re.subn(
+                  r"(id\s+'com\.android\.application'\s+version\s+')[^']+(')",
+                  rf'\g<1>{TARGET_AGP}\g<2>', settings)
+              total = n1 + n2 + n3 + n4
+              print(f"  [settings.gradle] Kotlin+AGP patches: {total}")
+
+              # GMS plugin
+              settings, gms_n = re.subn(
+                  r'(id\s+["\']com\.google\.gms\.google-services["\'])\s+version\s+["\'][^"\']+["\']',
+                  rf'\g<1> version "{TARGET_GMS}"', settings)
+              print(f"  [settings.gradle] GMS plugin: {'PATCHED' if gms_n else 'no match'}")
+
+              write('android/settings.gradle', settings)
+
+          # ── android/app/build.gradle ──────────────────────────────────────
+          app_gradle = read('android/app/build.gradle')
+          if app_gradle is not None:
+              app_gradle, n = re.subn(
+                  r'(com\.google\.gms:google-services:)[\d.]+',
+                  rf'\g<1>{TARGET_GMS}', app_gradle)
+              print(f"  [app/build.gradle] GMS classpath: {'PATCHED' if n else 'no match'}")
+              write('android/app/build.gradle', app_gradle)
+
+          # ── gradle-wrapper.properties ─────────────────────────────────────
+          patch('android/gradle/wrapper/gradle-wrapper.properties', [
+              (r'distributionUrl=.*',
+               f'distributionUrl={TARGET_GRADLE}', 'gradle dist URL'),
+          ])
+
+          # ── AndroidManifest.xml ───────────────────────────────────────────
+          manifest_path = 'android/app/src/main/AndroidManifest.xml'
+          manifest = read(manifest_path)
+          if manifest is not None:
+              # Add permissions
+              perms = [
+                  'android.permission.INTERNET',
+                  'android.permission.READ_EXTERNAL_STORAGE',
+                  'android.permission.READ_MEDIA_IMAGES',
+                  'android.permission.READ_MEDIA_VIDEO',
+              ]
+              for perm in perms:
+                  tag = f'<uses-permission android:name="{perm}"/>'
+                  if perm not in manifest:
+                      manifest = manifest.replace(
+                          '<application', f'{tag}\n    <application', 1)
+                      print(f'  [AndroidManifest] Added {perm}')
+                  else:
+                      print(f'  [AndroidManifest] Already has {perm}')
+
+              # Add queries block for url_launcher (required Android API 30+)
+              queries_block = (
+                  '    <queries>\n'
+                  '        <intent>\n'
+                  '            <action android:name="android.intent.action.VIEW" />\n'
+                  '            <data android:scheme="https" />\n'
+                  '        </intent>\n'
+                  '        <intent>\n'
+                  '            <action android:name="android.intent.action.VIEW" />\n'
+                  '            <data android:scheme="http" />\n'
+                  '        </intent>\n'
+                  '    </queries>'
+              )
+              if '<queries>' not in manifest:
+                  manifest = manifest.replace(
+                      '</manifest>',
+                      f'{queries_block}\n</manifest>'
+                  )
+                  print('  [AndroidManifest] Added queries for url_launcher')
+              else:
+                  print('  [AndroidManifest] queries already present')
+
+              write(manifest_path, manifest)
+          else:
+              print(f'  SKIP (not found): {manifest_path}')
+
+          print("\nDone patching.")
+          EOF
+
+      - name: Debug - Show patched files
+        run: |
+          echo "=== PATCHED android/settings.gradle ==="
+          cat android/settings.gradle || echo "(not found)"
+          echo ""
+          echo "=== PATCHED android/app/build.gradle ==="
+          cat android/app/build.gradle || echo "(not found)"
+          echo ""
+          echo "=== PATCHED AndroidManifest.xml ==="
+          cat android/app/src/main/AndroidManifest.xml || echo "(not found)"
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: entwined-memories-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
+
+      - name: Show APK info
+        run: |
+          echo "✅ APK built successfully!"
+          ls -lh build/app/outputs/flutter-apk/

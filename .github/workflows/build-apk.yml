@@ -11,6 +11,9 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: entwined-memories-app
 
     steps:
       - name: Checkout repository
@@ -207,7 +210,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: entwined-memories-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          path: entwined-memories-app/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 30
 
       - name: Show APK info

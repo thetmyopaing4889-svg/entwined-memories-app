@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -28,6 +30,7 @@ class VideoPlayerScreen extends StatefulWidget {
 
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final WebViewController _controller;
+  int _loadAttempt = 0;
   bool _isLoading = true;
   bool _hasError = false;
   bool _showPlayFallback = true;
@@ -85,6 +88,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   <div class="wrap">
     <iframe
       src="$src"
+      onload="document.body.setAttribute('data-player-frame-loaded', 'true')"
       allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
       allowfullscreen
       referrerpolicy="strict-origin-when-cross-origin"
@@ -95,11 +99,47 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 </html>''';
   }
 
-  Future<void> _loadEmbed({required bool autoplay}) {
-    return _controller.loadHtmlString(
+  Future<void> _loadEmbed({required bool autoplay}) async {
+    final attempt = ++_loadAttempt;
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _hasError = false;
+      });
+    }
+
+    await _controller.loadHtmlString(
       _buildHtml(autoplay: autoplay),
       baseUrl: _appReferrer,
     );
+
+    // loadHtmlString reports the local wrapper as "finished" even when the
+    // remote iframe is still loading. Wait for the iframe itself and keep the
+    // loading state bounded so a blocked YouTube request never spins forever.
+    var frameLoaded = false;
+    for (var i = 0; i < 60 && mounted && attempt == _loadAttempt; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      try {
+        final marker = await _controller.runJavaScriptReturningResult(
+          "document.body.getAttribute('data-player-frame-loaded')",
+        );
+        if (marker.toString().replaceAll('"', '') == 'true') {
+          frameLoaded = true;
+          break;
+        }
+      } catch (_) {
+        // The WebView may still be initializing its JavaScript context.
+      }
+    }
+    if (!mounted || attempt != _loadAttempt) return;
+    if (frameLoaded) {
+      setState(() => _isLoading = false);
+    } else {
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+      });
+    }
   }
 
   @override
@@ -115,11 +155,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {
-            if (mounted) setState(() => _isLoading = true);
+            if (mounted) {
+              setState(() {
+                _isLoading = true;
+                _hasError = false;
+              });
+            }
           },
-          onPageFinished: (_) {
-            if (mounted) setState(() => _isLoading = false);
-          },
+          // The local HTML wrapper can finish before the remote YouTube
+          // iframe. _loadEmbed waits for the iframe's own load marker.
+          onPageFinished: (_) {},
           onWebResourceError: (error) {
             debugPrint(
                 '[VideoPlayerScreen] WebView error: ${error.description}');
@@ -132,20 +177,35 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
               });
             }
           },
+          onHttpError: (error) {
+            debugPrint(
+                '[VideoPlayerScreen] HTTP error ${error.response?.statusCode}'
+                ': ${error.request?.uri}');
+            final statusCode = error.response?.statusCode;
+            final host = error.request?.uri.host;
+            if (statusCode != null &&
+                statusCode >= 400 &&
+                host != null &&
+                (host == 'www.youtube-nocookie.com' ||
+                    host.endsWith('.youtube-nocookie.com'))) {
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                  _hasError = true;
+                });
+              }
+            }
+          },
         ),
-      )
-      ..loadHtmlString(
-        _buildHtml(autoplay: true),
-        baseUrl: _appReferrer,
       );
+
+    unawaited(_loadEmbed(autoplay: true));
   }
 
   Future<void> _playFromUserGesture() async {
     if (!mounted) return;
     setState(() {
       _showPlayFallback = false;
-      _isLoading = true;
-      _hasError = false;
     });
     // Reloading after a real tap gives Android WebView permission to start
     // media when autoplay was blocked on the first navigation.
@@ -154,6 +214,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
+    _loadAttempt++;
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,

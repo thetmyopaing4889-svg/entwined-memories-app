@@ -4,10 +4,19 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 /// Full-screen in-app player for a memory's YouTube video.
 ///
-/// Uses [WebView] + the standard YouTube embed URL
-/// (youtube.com/embed/{videoId}) instead of the IFrame API wrapper so
-/// that the embedded player works reliably on all Android versions without
-/// origin-restriction errors (101 / 150).
+/// Uses [WebView] + a locally-generated HTML wrapper page so that Android
+/// WebView sends the correct HTTP `Referer` and `Origin` headers that YouTube
+/// requires.
+///
+/// YouTube's Required Minimum Functionality spec (see
+/// https://developers.google.com/youtube/terms/required-minimum-functionality)
+/// says that in a WebView integration where no browser sets the Referer
+/// automatically, the app must supply it.  The `Referer` value must be the
+/// app's Android Application-ID formatted as an HTTPS URL
+/// (e.g. `https://com.entwinedmemories.entwined_memories`).
+///
+/// Using `https://www.youtube.com` as the Referer triggers stricter embed
+/// rules and causes Error 152-4 ("This video is unavailable").
 class VideoPlayerScreen extends StatefulWidget {
   final String videoId;
 
@@ -23,34 +32,73 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _hasError = false;
   bool _showPlayFallback = true;
 
-  static const _youtubeReferer = 'https://www.youtube.com/';
-  static const _youtubeOrigin = 'https://www.youtube.com';
+  /// The app's Android Application-ID expressed as an HTTPS URL.
+  ///
+  /// YouTube uses this as the embedding-page identity so the player can be
+  /// authorised for embedded playback.  This value must be stable across app
+  /// versions and must *not* be `https://www.youtube.com`.
+  static const _appReferrer =
+      'https://com.entwinedmemories.entwined_memories';
 
-  Uri _embedUri({required bool autoplay}) {
-    return Uri.https(
-      'www.youtube.com',
-      '/embed/${widget.videoId}',
-      <String, String>{
+  /// Build the local HTML page that hosts the YouTube IFrame.
+  ///
+  /// Key attributes that resolve Error 152-4 and Error 153:
+  ///  - `<meta name="referrer" content="strict-origin-when-cross-origin">` —
+  ///    ensures subsequent sub-resource requests carry the correct Referer.
+  ///  - `referrerpolicy="strict-origin-when-cross-origin"` on the `<iframe>`.
+  ///  - `origin=<appReferrer>` query parameter — matches the Referer the
+  ///    IFrame Player API expects for PostMessage authentication.
+  ///  - `youtube-nocookie.com` domain — privacy-enhanced endpoint; also
+  ///    recommended by YouTube for embedded players.
+  String _buildHtml({required bool autoplay}) {
+    final src = Uri(
+      scheme: 'https',
+      host: 'www.youtube-nocookie.com',
+      path: '/embed/${widget.videoId}',
+      queryParameters: {
         'autoplay': autoplay ? '1' : '0',
         'playsinline': '1',
         'controls': '1',
         'rel': '0',
         'enablejsapi': '1',
-        'origin': _youtubeOrigin,
+        'origin': _appReferrer,
       },
-    );
+    ).toString();
+
+    return '''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    .wrap { position: relative; width: 100%; height: 100%; }
+    iframe {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%; border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <iframe
+      src="$src"
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      allowfullscreen
+      referrerpolicy="strict-origin-when-cross-origin"
+      frameborder="0">
+    </iframe>
+  </div>
+</body>
+</html>''';
   }
 
   Future<void> _loadEmbed({required bool autoplay}) {
-    return _controller.loadRequest(
-      _embedUri(autoplay: autoplay),
-      headers: const {
-        // YouTube Error 153 is returned when an embedded player request
-        // cannot identify a valid embedding page. These headers are applied
-        // to the initial document request made by Android WebView.
-        'Referer': _youtubeReferer,
-        'Origin': _youtubeOrigin,
-      },
+    return _controller.loadHtmlString(
+      _buildHtml(autoplay: autoplay),
+      baseUrl: _appReferrer,
     );
   }
 
@@ -75,9 +123,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           onWebResourceError: (error) {
             debugPrint(
                 '[VideoPlayerScreen] WebView error: ${error.description}');
-            // YouTube pages load analytics, images, and other secondary
-            // resources. Only a failed main frame means the player itself
-            // failed to load.
+            // Only a failed main-frame load means the player itself failed.
             if (error.isForMainFrame != true) return;
             if (mounted) {
               setState(() {
@@ -88,12 +134,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           },
         ),
       )
-      ..loadRequest(
-        _embedUri(autoplay: true),
-        headers: const {
-          'Referer': _youtubeReferer,
-          'Origin': _youtubeOrigin,
-        },
+      ..loadHtmlString(
+        _buildHtml(autoplay: true),
+        baseUrl: _appReferrer,
       );
   }
 
@@ -111,7 +154,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
-    // Restore orientation and system UI in case the user went full-screen.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -156,6 +198,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                           fontSize: 14, color: Colors.white60, height: 1.6),
                     ),
                     const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      onPressed: _playFromUserGesture,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('ထပ်ကြိုးစားမယ်'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE8A0B4),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     TextButton(
                       onPressed: () => Navigator.pop(context),
                       child: const Text('နောက်သွားမယ်',

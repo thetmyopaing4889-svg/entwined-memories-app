@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
-import '../services/youtube_service.dart';
+import 'youtube_thumbnail.dart';
 
 class MemoryCard extends StatelessWidget {
   final Memory memory;
@@ -112,36 +112,15 @@ class _VideoThumbnail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final thumbnailUrl = YouTubeService.getThumbnailUrl(videoId);
     return ClipRRect(
       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Image.network(
-            thumbnailUrl,
+          YouTubeThumbnailImage(
+            videoId: videoId,
             width: double.infinity,
             height: 200,
-            fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                height: 200,
-                color: const Color(0xFFFFE0E8),
-                child: const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFFE8A0B4), strokeWidth: 2),
-                ),
-              );
-            },
-            errorBuilder: (_, __, ___) => Container(
-              height: 200,
-              color: Colors.black87,
-              child: const Center(
-                child: Icon(Icons.videocam_off,
-                    color: Colors.white54, size: 48),
-              ),
-            ),
           ),
           Container(
             width: 56,

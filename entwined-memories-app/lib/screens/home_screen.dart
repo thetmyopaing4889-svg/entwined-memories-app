@@ -8,6 +8,7 @@ import '../services/youtube_service.dart';
 import '../utils/memory_stats.dart';
 import '../widgets/home_hero.dart';
 import '../widgets/memory_card.dart';
+import '../widgets/youtube_thumbnail.dart';
 import 'add_memory_screen.dart';
 import 'video_player_screen.dart';
 
@@ -369,10 +370,9 @@ class _MemoryDetailSheet extends StatelessWidget {
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          Image.network(
-                            YouTubeService.getThumbnailUrl(memory.videoId!),
+                          YouTubeThumbnailImage(
+                            videoId: memory.videoId!,
                             width: double.infinity,
-                            fit: BoxFit.cover,
                           ),
                           GestureDetector(
                            onTap: memory.isVideoReady

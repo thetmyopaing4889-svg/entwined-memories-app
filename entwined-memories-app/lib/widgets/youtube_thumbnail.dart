@@ -32,6 +32,7 @@ class YouTubeThumbnailImage extends StatefulWidget {
 
 class _YouTubeThumbnailImageState extends State<YouTubeThumbnailImage> {
   int _urlIndex = 0;
+  bool _fallbackScheduled = false;
 
   List<String> get _candidates => [
         'https://img.youtube.com/vi/${widget.videoId}/hqdefault.jpg',
@@ -39,14 +40,30 @@ class _YouTubeThumbnailImageState extends State<YouTubeThumbnailImage> {
         'https://i.ytimg.com/vi/${widget.videoId}/mqdefault.jpg',
       ];
 
-  void _onError() {
-    if (!mounted) return;
-    final next = _urlIndex + 1;
-    if (next < _candidates.length) {
-      setState(() => _urlIndex = next);
-    } else {
-      // All URLs exhausted — stay at last index; builder will show placeholder.
-      setState(() => _urlIndex = _candidates.length);
+  void _scheduleNextUrl() {
+    if (!mounted || _fallbackScheduled) return;
+    _fallbackScheduled = true;
+
+    // Image.errorBuilder can run while Flutter is still building this widget.
+    // Never call setState synchronously from that callback; wait until the
+    // current frame has completed before switching to the next CDN URL.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fallbackScheduled = false;
+      if (!mounted) return;
+
+      final next = _urlIndex + 1;
+      setState(() {
+        _urlIndex = next < _candidates.length ? next : _candidates.length;
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant YouTubeThumbnailImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoId != widget.videoId) {
+      _urlIndex = 0;
+      _fallbackScheduled = false;
     }
   }
 
@@ -72,8 +89,9 @@ class _YouTubeThumbnailImageState extends State<YouTubeThumbnailImage> {
         debugPrint(
             '[YouTubeThumbnailImage] url #$_urlIndex failed for '
             'videoId=${widget.videoId}: $error');
-        _onError();
-        // Return the placeholder while setState re-renders.
+        _scheduleNextUrl();
+        // Show a safe placeholder for this frame while the next URL is
+        // selected after the build phase.
         return _Placeholder(
             height: widget.height ?? 200,
             width: widget.width ?? double.infinity);

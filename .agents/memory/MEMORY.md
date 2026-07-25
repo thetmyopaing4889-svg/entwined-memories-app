@@ -1,3 +1,3 @@
 - [YouTube processing status](youtube-processing-status.md) — YouTube upload tokens need read scope for processing-status polling; the Worker owns OAuth and the app polls through it.
-- [YouTube WebView Error 153](youtube-webview-error-153.md) — Android embeds need an explicit YouTube referrer/origin configuration in the player request.
+- [YouTube playback reliability](youtube-webview-error-153.md) — WebView embeds can trigger server-side bot checks; official YouTube app/browser is the reliable playback path.
 - [YouTube upload ownership](youtube-upload-ownership.md) — video metadata is sent directly from Flutter to YouTube; the Worker only provides tokens and status lookup.

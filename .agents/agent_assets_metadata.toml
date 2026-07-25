@@ -12,3 +12,15 @@ id = "qnWb0afcwo75lpSE-L7eu"
 uri = "file://audit_report_entwined_memories.txt.zip"
 type = "unspecified"
 title = "Download Audit Report ZIP"
+
+[[outputs]]
+id = "dqwiB93S4DeQeXt7r2V8j"
+uri = "file://delivered-apk/entwined-memories-debug-00b7a6f.apk"
+type = "unspecified"
+title = "Entwined Memories APK — official YouTube playback"
+
+[[outputs]]
+id = "VqbD2mZwN776NTBRDs5wW"
+uri = "file://delivered-apk/entwined-memories-debug-98d2678.apk"
+type = "unspecified"
+title = "Entwined Memories APK — in-app WebView player"

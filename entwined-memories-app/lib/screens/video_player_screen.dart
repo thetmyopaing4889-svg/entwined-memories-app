@@ -126,6 +126,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      // Override the default Android WebView UA which contains "wv".
+      // YouTube detects that marker and shows "Sign in to confirm you're not
+      // a bot" even for unlisted embeds.  A real Chrome Mobile UA bypasses it.
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+      )
+      ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) {

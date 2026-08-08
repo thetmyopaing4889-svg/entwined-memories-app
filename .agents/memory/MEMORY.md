@@ -1,3 +1,4 @@
 - [YouTube processing status](youtube-processing-status.md) — YouTube upload tokens need read scope for processing-status polling; the Worker owns OAuth and the app polls through it.
 - [YouTube playback reliability](youtube-webview-error-153.md) — WebView embeds can trigger server-side bot checks; official YouTube app/browser is the reliable playback path.
 - [YouTube upload ownership](youtube-upload-ownership.md) — video metadata is sent directly from Flutter to YouTube; the Worker only provides tokens and status lookup.
+- [GitHub push remote](github-push-remote.md) — a valid GitHub remote may be named `github` instead of `origin`; verify remote names before using managed push.

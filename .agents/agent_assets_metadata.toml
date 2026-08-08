@@ -24,3 +24,10 @@ id = "VqbD2mZwN776NTBRDs5wW"
 uri = "file://delivered-apk/entwined-memories-debug-98d2678.apk"
 type = "unspecified"
 title = "Entwined Memories APK — in-app WebView player"
+
+[[outputs]]
+id = "2We3kqVb4HByMazUw1sA2"
+uri = "file://.artifacts/entwined-memories-debug.apk"
+type = "unspecified"
+title = "Entwined Memories Debug APK"
+description = "Stage 1 UI and memory-flow build from GitHub Actions. Install this APK on an Android device for testing."

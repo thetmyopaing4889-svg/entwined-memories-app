@@ -16,6 +16,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameController = TextEditingController();
   DateTime? _birthday;
   String? _photoUrl;
+  String? _coverPhotoUrl;
   File? _newPhotoFile;
 
   bool _loading = true;
@@ -41,6 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _nameController.text = profile.name;
         _birthday = profile.birthday;
         _photoUrl = profile.photoUrl;
+        _coverPhotoUrl = profile.coverPhotoUrl;
         _loading = false;
       });
     } catch (e) {
@@ -110,6 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         name: name,
         birthday: _birthday,
         photoUrl: finalPhotoUrl,
+        coverPhotoUrl: _coverPhotoUrl,
       )).timeout(const Duration(seconds: 20));
       if (mounted) {
         _showSnack('Profile သိမ်းပြီးပြီ ✨');

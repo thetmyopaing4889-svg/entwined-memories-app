@@ -13,11 +13,13 @@ import 'her_beginning_card.dart';
 class HomeHero extends StatelessWidget {
   final ChildProfile profile;
   final MemoryStats stats;
+  final VoidCallback? onViewBeginning;
 
   const HomeHero({
     super.key,
     required this.profile,
     required this.stats,
+    this.onViewBeginning,
   });
 
   @override
@@ -49,7 +51,7 @@ class HomeHero extends StatelessWidget {
               const SizedBox(height: 14),
               _AgeBlock(birthday: profile.birthday),
               const SizedBox(height: 24),
-              const HerBeginningCard(),
+              HerBeginningCard(onViewStory: onViewBeginning),
               const SizedBox(height: 22),
               _MemorySummary(stats: stats),
               const SizedBox(height: 24),

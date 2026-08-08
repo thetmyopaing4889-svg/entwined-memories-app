@@ -8,9 +8,9 @@ import '../services/youtube_service.dart';
 import '../utils/memory_stats.dart';
 import '../widgets/home_hero.dart';
 import '../widgets/memory_card.dart';
-import '../widgets/youtube_thumbnail.dart';
 import 'add_memory_screen.dart';
-import 'video_player_screen.dart';
+import 'her_beginning_screen.dart';
+import 'memory_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -106,11 +106,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showDetail(Memory memory) {
-    showModalBottomSheet(
+    Navigator.push(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _MemoryDetailSheet(memory: memory),
+      MaterialPageRoute(
+        builder: (_) => MemoryDetailScreen(memory: memory),
+      ),
+    );
+  }
+
+  void _openBeginning(ChildProfile profile) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HerBeginningScreen(profile: profile),
+      ),
     );
   }
 
@@ -183,6 +192,13 @@ class _HomeScreenState extends State<HomeScreen> {
               snapshot.connectionState == ConnectionState.waiting;
           final stats = MemoryStats.fromMemories(memories);
 
+          if (snapshot.hasError) {
+            return _HomeErrorState(
+              message: 'Memory timeline ဖွင့်မရသေးဘူး',
+              detail: 'Internet connection နဲ့ Firestore ကို စစ်ပြီး ထပ်ကြိုးစားပါ။',
+            );
+          }
+
           return CustomScrollView(
             slivers: [
               // ── Home hero: cover photo, avatar, name, age, memory
@@ -192,7 +208,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   stream: ProfileService.profileStream(),
                   builder: (context, profileSnapshot) {
                     final profile = profileSnapshot.data ?? ChildProfile.empty;
-                    return HomeHero(profile: profile, stats: stats);
+                    return HomeHero(
+                      profile: profile,
+                      stats: stats,
+                      onViewBeginning: () => _openBeginning(profile),
+                    );
                   },
                 ),
               ),
@@ -312,176 +332,46 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ── Memory Detail Bottom Sheet ────────────────────────────────────────────────
-class _MemoryDetailSheet extends StatelessWidget {
-  final Memory memory;
-  const _MemoryDetailSheet({required this.memory});
+class _HomeErrorState extends StatelessWidget {
+  final String message;
+  final String detail;
 
-  void _playInApp(BuildContext context) {
-    if (!memory.isVideoReady) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Video အဆင်သင့်ဖြစ်အောင် processing လုပ်နေတယ်'),
-        behavior: SnackBarBehavior.floating,
-      ));
-      return;
-    }
-    final videoId = memory.videoId!;
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => VideoPlayerScreen(videoId: videoId)),
-    );
-  }
+  const _HomeErrorState({
+    required this.message,
+    required this.detail,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      builder: (_, controller) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: ListView(
-          controller: controller,
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Handle
-            Center(
-              child: Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
-                ),
+            const Icon(
+              Icons.cloud_off_outlined,
+              color: Color(0xFFE8A0B4),
+              size: 54,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF3D2C33),
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
               ),
             ),
-
-            // YouTube video thumbnail + watch button
-            if (memory.hasVideo)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          YouTubeThumbnailImage(
-                            videoId: memory.videoId!,
-                            width: double.infinity,
-                          ),
-                          GestureDetector(
-                           onTap: memory.isVideoReady
-                               ? () => _playInApp(context)
-                               : null,
-                            child: Container(
-                              width: 64,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.65),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.play_arrow,
-                                  color: Colors.white, size: 36),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: memory.isVideoReady
-                            ? () => _playInApp(context)
-                            : null,
-                        icon: const Icon(Icons.play_circle_outline),
-                        label: const Text('YouTube မှာ ကြည့်မယ်'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Photo
-            if (!memory.hasVideo && memory.hasImage)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    memory.imageUrl!,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (_, child, progress) {
-                      if (progress == null) return child;
-                      return Container(
-                        height: 200,
-                        color: const Color(0xFFFFE0E8),
-                        child: const Center(
-                          child: CircularProgressIndicator(
-                              color: Color(0xFFE8A0B4), strokeWidth: 2),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(memory.formattedDate,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFFB0889A),
-                              fontWeight: FontWeight.w500)),
-                      Text(memory.mood,
-                          style: const TextStyle(fontSize: 28)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    memory.note,
-                    style: const TextStyle(
-                        fontSize: 15,
-                        color: Color(0xFF3D2C33),
-                        height: 1.75,
-                        letterSpacing: 0.1),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFE0E8),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Added by ${memory.createdBy}',
-                      style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF8B3A52),
-                          fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                ],
+            const SizedBox(height: 8),
+            Text(
+              detail,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFB0889A),
+                fontSize: 13,
+                height: 1.5,
               ),
             ),
           ],

@@ -14,26 +14,20 @@ class HerBeginningCard extends StatelessWidget {
   final String? hospital;
   final String? location;
   final String? birthWeight;
+  final VoidCallback? onViewStory;
 
   const HerBeginningCard({
     super.key,
     this.hospital,
     this.location,
     this.birthWeight,
+    this.onViewStory,
   });
 
   bool get _hasData =>
       (hospital != null && hospital!.trim().isNotEmpty) ||
       (location != null && location!.trim().isNotEmpty) ||
       (birthWeight != null && birthWeight!.trim().isNotEmpty);
-
-  void _viewStory(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('သူငယ်ချင်း ဇာတ်လမ်းအပြည့်အစုံ မကြာမီ ရောက်လာပါမယ် 💕'),
-      backgroundColor: Color(0xFFE8A0B4),
-      behavior: SnackBarBehavior.floating,
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +64,7 @@ class HerBeginningCard extends StatelessWidget {
           if (_hasData) ..._buildSummary() else _buildEmptyState(),
           const SizedBox(height: 14),
           GestureDetector(
-            onTap: () => _viewStory(context),
+            onTap: onViewStory,
             child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [

@@ -15,6 +15,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   String _version = '';
+  String _playbackPreference = 'auto';
 
   @override
   void initState() {
@@ -24,6 +25,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final name = await MemoryService.loadCreatorName();
+    final playbackPreference = await MemoryService.loadPlaybackPreference();
     String version = '';
     try {
       final info = await PackageInfo.fromPlatform();
@@ -35,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _nameController.text = name;
       _version = version;
+      _playbackPreference = playbackPreference;
       _loading = false;
     });
   }
@@ -75,6 +78,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context,
       MaterialPageRoute(builder: (_) => const ProfileScreen()),
     );
+  }
+
+  Future<void> _savePlaybackPreference(String? value) async {
+    if (value == null) return;
+    setState(() => _playbackPreference = value);
+    try {
+      await MemoryService.savePlaybackPreference(value);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Playback setting သိမ်းပြီးပြီ'),
+        backgroundColor: Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Playback setting သိမ်းမရသေးဘူး: $error'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
   }
 
   void _showAbout() {
@@ -131,6 +156,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onTap: _showAbout,
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Playback',
+                          style: TextStyle(
+                            color: Color(0xFF3D2C33),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Memory story ကို အလိုအလျောက် ပြမလား၊ ကိုယ်တိုင် swipe လုပ်မလား',
+                          style: TextStyle(
+                            color: Color(0xFFB0889A),
+                            fontSize: 12,
+                            height: 1.4,
+                          ),
+                        ),
+                        RadioListTile<String>(
+                          contentPadding: EdgeInsets.zero,
+                          value: 'auto',
+                          groupValue: _playbackPreference,
+                          title: const Text('Auto slideshow'),
+                          subtitle: const Text('Memory တစ်ခုကို ၄ စက္ကန့်ပြမယ်'),
+                          activeColor: const Color(0xFFE8A0B4),
+                          onChanged: _savePlaybackPreference,
+                        ),
+                        RadioListTile<String>(
+                          contentPadding: EdgeInsets.zero,
+                          value: 'manual',
+                          groupValue: _playbackPreference,
+                          title: const Text('Manual'),
+                          subtitle: const Text('ကိုယ်တိုင် swipe လုပ်မယ်'),
+                          activeColor: const Color(0xFFE8A0B4),
+                          onChanged: _savePlaybackPreference,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 24),

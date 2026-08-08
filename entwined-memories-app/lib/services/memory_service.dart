@@ -5,6 +5,7 @@ import '../models/memory.dart';
 class MemoryService {
   static final _col = FirebaseFirestore.instance.collection('memories');
   static const _creatorNameKey = 'entwined_creator_name';
+  static const _playbackPreferenceKey = 'entwined_playback_preference';
 
   // ── Real-time stream ──────────────────────────────────────────────────────
 
@@ -57,5 +58,17 @@ class MemoryService {
   static Future<void> saveCreatorName(String name) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_creatorNameKey, name);
+  }
+
+  /// `auto` advances the full-screen story every four seconds; `manual`
+  /// leaves page changes under the parent's control.
+  static Future<String> loadPlaybackPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_playbackPreferenceKey) ?? 'auto';
+  }
+
+  static Future<void> savePlaybackPreference(String preference) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_playbackPreferenceKey, preference);
   }
 }

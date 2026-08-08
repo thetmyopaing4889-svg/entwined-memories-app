@@ -17,6 +17,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   DateTime? _birthday;
   String? _photoUrl;
   String? _coverPhotoUrl;
+  ChildProfile? _loadedProfile;
   File? _newPhotoFile;
 
   bool _loading = true;
@@ -39,6 +40,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .timeout(const Duration(seconds: 15));
       if (!mounted) return;
       setState(() {
+        _loadedProfile = profile;
         _nameController.text = profile.name;
         _birthday = profile.birthday;
         _photoUrl = profile.photoUrl;
@@ -108,17 +110,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
         finalPhotoUrl = await CloudinaryService.uploadImage(_newPhotoFile!)
             .timeout(const Duration(seconds: 60));
       }
-      await ProfileService.saveProfile(ChildProfile(
+      final savedProfile = ChildProfile(
         name: name,
         birthday: _birthday,
         photoUrl: finalPhotoUrl,
         coverPhotoUrl: _coverPhotoUrl,
-      )).timeout(const Duration(seconds: 20));
+        beginningTitle: _loadedProfile?.beginningTitle,
+        beginningSubtitle: _loadedProfile?.beginningSubtitle,
+        beginningStory: _loadedProfile?.beginningStory,
+        birthPlace: _loadedProfile?.birthPlace,
+        birthWeight: _loadedProfile?.birthWeight,
+      );
+      await ProfileService.saveProfile(savedProfile)
+          .timeout(const Duration(seconds: 20));
       if (mounted) {
         _showSnack('Profile သိမ်းပြီးပြီ ✨');
         setState(() {
           _photoUrl = finalPhotoUrl;
           _newPhotoFile = null;
+          _loadedProfile = savedProfile;
         });
       }
     } catch (e) {

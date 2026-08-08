@@ -51,7 +51,11 @@ class HomeHero extends StatelessWidget {
               const SizedBox(height: 14),
               _AgeBlock(birthday: profile.birthday),
               const SizedBox(height: 24),
-              HerBeginningCard(onViewStory: onViewBeginning),
+              HerBeginningCard(
+                hospital: profile.birthPlace,
+                birthWeight: profile.birthWeight,
+                onViewStory: onViewBeginning,
+              ),
               const SizedBox(height: 22),
               _MemorySummary(stats: stats),
               const SizedBox(height: 24),

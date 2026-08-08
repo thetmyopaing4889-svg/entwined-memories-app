@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 import '../models/child_profile.dart';
+import '../services/profile_service.dart';
 
-class HerBeginningScreen extends StatelessWidget {
+class HerBeginningScreen extends StatefulWidget {
   final ChildProfile profile;
 
   const HerBeginningScreen({super.key, required this.profile});
+
+  @override
+  State<HerBeginningScreen> createState() => _HerBeginningScreenState();
+}
+
+class _HerBeginningScreenState extends State<HerBeginningScreen> {
+  late ChildProfile _profile;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _profile = widget.profile;
+  }
 
   String _formatBirthday(DateTime? date) {
     if (date == null) return 'Birthday not added yet';
@@ -27,14 +42,24 @@ class HerBeginningScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = profile.name.trim().isEmpty ? 'Your baby' : profile.name.trim();
-    final age = profile.birthday == null
+    final name =
+        _profile.name.trim().isEmpty ? 'Your baby' : _profile.name.trim();
+    final age = _profile.birthday == null
         ? 'Every chapter starts with love.'
-        : _formatAge(profile.birthday!);
+        : _formatAge(_profile.birthday!);
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFF5F7),
-      appBar: AppBar(title: const Text('Her Beginning')),
+      appBar: AppBar(
+        title: const Text('Her Beginning'),
+        actions: [
+          IconButton(
+            onPressed: _saving ? null : _editStory,
+            tooltip: 'Edit story',
+            icon: const Icon(Icons.edit_outlined),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
         children: [
@@ -47,9 +72,10 @@ class HerBeginningScreen extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              image: profile.photoUrl != null && profile.photoUrl!.isNotEmpty
+              image: _profile.photoUrl != null &&
+                      _profile.photoUrl!.isNotEmpty
                   ? DecorationImage(
-                      image: NetworkImage(profile.photoUrl!),
+                      image: NetworkImage(_profile.photoUrl!),
                       fit: BoxFit.cover,
                       colorFilter: const ColorFilter.mode(
                         Colors.black26,
@@ -58,7 +84,7 @@ class HerBeginningScreen extends StatelessWidget {
                     )
                   : null,
             ),
-            child: profile.photoUrl == null || profile.photoUrl!.isEmpty
+            child: _profile.photoUrl == null || _profile.photoUrl!.isEmpty
                 ? const Center(
                     child: Icon(
                       Icons.child_care_rounded,
@@ -70,7 +96,9 @@ class HerBeginningScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Text(
-            'The day $name began',
+            _profile.beginningTitle?.trim().isNotEmpty == true
+                ? _profile.beginningTitle!.trim()
+                : 'The day $name began',
             style: const TextStyle(
               color: Color(0xFF3D2C33),
               fontSize: 26,
@@ -79,8 +107,10 @@ class HerBeginningScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'A small beginning. A lifetime of memories.',
+          Text(
+            _profile.beginningSubtitle?.trim().isNotEmpty == true
+                ? _profile.beginningSubtitle!.trim()
+                : 'A small beginning. A lifetime of memories.',
             style: TextStyle(
               color: Color(0xFF8B3A52),
               fontSize: 15,
@@ -91,7 +121,7 @@ class HerBeginningScreen extends StatelessWidget {
           _InfoCard(
             icon: Icons.cake_outlined,
             label: 'Birthday',
-            value: _formatBirthday(profile.birthday),
+            value: _formatBirthday(_profile.birthday),
           ),
           const SizedBox(height: 12),
           _InfoCard(
@@ -106,10 +136,12 @@ class HerBeginningScreen extends StatelessWidget {
               color: Colors.white,
               borderRadius: BorderRadius.circular(22),
             ),
-            child: const Text(
-              'This is a quiet place for the first pages of her story — '
-              'the little details, the first smiles, and all the love that '
-              'surrounded her from the very beginning.',
+            child: Text(
+              _profile.beginningStory?.trim().isNotEmpty == true
+                  ? _profile.beginningStory!.trim()
+                  : 'This is a quiet place for the first pages of her story — '
+                      'the little details, the first smiles, and all the love '
+                      'that surrounded her from the very beginning.',
               style: TextStyle(
                 color: Color(0xFF3D2C33),
                 fontSize: 16,
@@ -120,6 +152,20 @@ class HerBeginningScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _editStory() async {
+    final updated = await Navigator.push<ChildProfile>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HerBeginningEditScreen(profile: _profile),
+      ),
+    );
+    if (updated == null || !mounted) return;
+    setState(() {
+      _profile = updated;
+      _saving = false;
+    });
   }
 
   String _formatAge(DateTime birthday) {
@@ -144,6 +190,186 @@ class HerBeginningScreen extends StatelessWidget {
     final monthLabel =
         remainingMonths == 1 ? '1 month' : '$remainingMonths months';
     return '$yearLabel $monthLabel of wonder';
+  }
+}
+
+class HerBeginningEditScreen extends StatefulWidget {
+  final ChildProfile profile;
+
+  const HerBeginningEditScreen({super.key, required this.profile});
+
+  @override
+  State<HerBeginningEditScreen> createState() => _HerBeginningEditScreenState();
+}
+
+class _HerBeginningEditScreenState extends State<HerBeginningEditScreen> {
+  late final TextEditingController _titleController;
+  late final TextEditingController _subtitleController;
+  late final TextEditingController _storyController;
+  late final TextEditingController _birthPlaceController;
+  late final TextEditingController _birthWeightController;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    _titleController = TextEditingController(text: profile.beginningTitle);
+    _subtitleController =
+        TextEditingController(text: profile.beginningSubtitle);
+    _storyController = TextEditingController(text: profile.beginningStory);
+    _birthPlaceController = TextEditingController(text: profile.birthPlace);
+    _birthWeightController = TextEditingController(text: profile.birthWeight);
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _subtitleController.dispose();
+    _storyController.dispose();
+    _birthPlaceController.dispose();
+    _birthWeightController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final profile = widget.profile;
+    final updated = ChildProfile(
+      name: profile.name,
+      birthday: profile.birthday,
+      photoUrl: profile.photoUrl,
+      coverPhotoUrl: profile.coverPhotoUrl,
+      beginningTitle: _titleController.text.trim(),
+      beginningSubtitle: _subtitleController.text.trim(),
+      beginningStory: _storyController.text.trim(),
+      birthPlace: _birthPlaceController.text.trim(),
+      birthWeight: _birthWeightController.text.trim(),
+    );
+    try {
+      await ProfileService.saveProfile(updated);
+      if (!mounted) return;
+      Navigator.pop(context, updated);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Her Beginning သိမ်းမရသေးဘူး: $error'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  InputDecoration _decoration(String hint) => InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      );
+
+  Widget _label(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Color(0xFF3D2C33),
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFF5F7),
+      appBar: AppBar(title: const Text('Write Her Beginning')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
+        children: [
+          const Text(
+            'ဒီစာတွေကို မိသားစုအတွက် ကိုယ်တိုင်ရေးထားနိုင်ပါတယ်။ နောက်မှ ပြန်ပြင်လို့လည်းရပါတယ်။',
+            style: TextStyle(
+              color: Color(0xFF8B3A52),
+              fontSize: 14,
+              height: 1.6,
+            ),
+          ),
+          const SizedBox(height: 24),
+          _label('Story title'),
+          TextField(
+            controller: _titleController,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: _decoration('ဥပမာ - The day our little love began'),
+          ),
+          const SizedBox(height: 18),
+          _label('Short introduction'),
+          TextField(
+            controller: _subtitleController,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: _decoration('ဥပမာ - A small beginning...'),
+          ),
+          const SizedBox(height: 18),
+          _label('Her story'),
+          TextField(
+            controller: _storyController,
+            minLines: 6,
+            maxLines: 12,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: _decoration('သူမရဲ့ ပထမဆုံးနေ့အကြောင်း ရေးပါ'),
+          ),
+          const SizedBox(height: 18),
+          _label('Born at (optional)'),
+          TextField(
+            controller: _birthPlaceController,
+            textCapitalization: TextCapitalization.words,
+            decoration: _decoration('ဆေးရုံ / နေရာ'),
+          ),
+          const SizedBox(height: 18),
+          _label('Birth weight (optional)'),
+          TextField(
+            controller: _birthWeightController,
+            decoration: _decoration('ဥပမာ - 3.2 kg'),
+          ),
+          const SizedBox(height: 28),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _saving ? null : _save,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE8A0B4),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 15),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              child: _saving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text(
+                      'Save Her Beginning',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

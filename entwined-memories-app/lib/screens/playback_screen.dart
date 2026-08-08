@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../models/memory.dart';
 import '../services/memory_service.dart';
 import '../widgets/youtube_thumbnail.dart';
@@ -14,6 +15,18 @@ class PlaybackScreen extends StatefulWidget {
 
 class _PlaybackScreenState extends State<PlaybackScreen> {
   DateTimeRange? _range;
+  bool _autoPlay = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlaybackPreference();
+  }
+
+  Future<void> _loadPlaybackPreference() async {
+    final preference = await MemoryService.loadPlaybackPreference();
+    if (mounted) setState(() => _autoPlay = preference != 'manual');
+  }
 
   Future<void> _pickRange() async {
     final now = DateTime.now();
@@ -70,7 +83,11 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => MemoryStoryScreen(memories: memories, initialIndex: index),
+        builder: (_) => MemoryStoryScreen(
+          memories: memories,
+          initialIndex: index,
+          autoPlay: _autoPlay,
+        ),
       ),
     );
   }
@@ -329,11 +346,13 @@ class _PlaybackMemoryTile extends StatelessWidget {
 class MemoryStoryScreen extends StatefulWidget {
   final List<Memory> memories;
   final int initialIndex;
+  final bool autoPlay;
 
   const MemoryStoryScreen({
     super.key,
     required this.memories,
     this.initialIndex = 0,
+    this.autoPlay = true,
   });
 
   @override
@@ -343,6 +362,7 @@ class MemoryStoryScreen extends StatefulWidget {
 class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
   late final PageController _controller;
   late int _index;
+  Timer? _timer;
 
   @override
   void initState() {
@@ -351,12 +371,31 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
         .clamp(0, widget.memories.length - 1)
         .toInt();
     _controller = PageController(initialPage: _index);
+    if (widget.autoPlay) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startAutoPlay());
+    }
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  void _startAutoPlay() {
+    if (!mounted || widget.memories.length < 2) return;
+    _timer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      if (_index >= widget.memories.length - 1) {
+        _timer?.cancel();
+        return;
+      }
+      _controller.nextPage(
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   void _openVideo(Memory memory) {
@@ -377,6 +416,19 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
         backgroundColor: const Color(0xFF24191E),
         foregroundColor: Colors.white,
         title: Text('${_index + 1} / ${widget.memories.length}'),
+        actions: [
+          if (widget.autoPlay)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: Icon(
+                  Icons.play_circle_outline,
+                  size: 20,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+        ],
       ),
       body: PageView.builder(
         controller: _controller,

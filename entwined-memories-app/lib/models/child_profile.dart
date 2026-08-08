@@ -6,12 +6,22 @@ class ChildProfile {
   final DateTime? birthday;
   final String? photoUrl; // Cloudinary URL
   final String? coverPhotoUrl; // Cloudinary URL, used by the Home hero cover
+  final String? beginningTitle;
+  final String? beginningSubtitle;
+  final String? beginningStory;
+  final String? birthPlace;
+  final String? birthWeight;
 
   const ChildProfile({
     required this.name,
     this.birthday,
     this.photoUrl,
     this.coverPhotoUrl,
+    this.beginningTitle,
+    this.beginningSubtitle,
+    this.beginningStory,
+    this.birthPlace,
+    this.birthWeight,
   });
 
   static const empty = ChildProfile(name: '');
@@ -21,6 +31,11 @@ class ChildProfile {
         'birthday': birthday != null ? Timestamp.fromDate(birthday!) : null,
         'photoUrl': photoUrl,
         'coverPhotoUrl': coverPhotoUrl,
+        'beginningTitle': beginningTitle,
+        'beginningSubtitle': beginningSubtitle,
+        'beginningStory': beginningStory,
+        'birthPlace': birthPlace,
+        'birthWeight': birthWeight,
       };
 
   factory ChildProfile.fromMap(Map<String, dynamic>? data) {
@@ -32,6 +47,35 @@ class ChildProfile {
       // Safe for existing documents that predate this field — Firestore
       // simply returns null for a key that was never written.
       coverPhotoUrl: data['coverPhotoUrl'] as String?,
+      beginningTitle: data['beginningTitle'] as String?,
+      beginningSubtitle: data['beginningSubtitle'] as String?,
+      beginningStory: data['beginningStory'] as String?,
+      birthPlace: data['birthPlace'] as String?,
+      birthWeight: data['birthWeight'] as String?,
+    );
+  }
+
+  ChildProfile copyWith({
+    String? name,
+    DateTime? birthday,
+    String? photoUrl,
+    String? coverPhotoUrl,
+    String? beginningTitle,
+    String? beginningSubtitle,
+    String? beginningStory,
+    String? birthPlace,
+    String? birthWeight,
+  }) {
+    return ChildProfile(
+      name: name ?? this.name,
+      birthday: birthday ?? this.birthday,
+      photoUrl: photoUrl ?? this.photoUrl,
+      coverPhotoUrl: coverPhotoUrl ?? this.coverPhotoUrl,
+      beginningTitle: beginningTitle ?? this.beginningTitle,
+      beginningSubtitle: beginningSubtitle ?? this.beginningSubtitle,
+      beginningStory: beginningStory ?? this.beginningStory,
+      birthPlace: birthPlace ?? this.birthPlace,
+      birthWeight: birthWeight ?? this.birthWeight,
     );
   }
 

@@ -107,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showDetail(Memory memory) {
     Navigator.push(
-      context: context,
+      context,
       MaterialPageRoute(
         builder: (_) => MemoryDetailScreen(memory: memory),
       ),
@@ -193,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
           final stats = MemoryStats.fromMemories(memories);
 
           if (snapshot.hasError) {
-            return _HomeErrorState(
+            return const _HomeErrorState(
               message: 'Memory timeline ဖွင့်မရသေးဘူး',
               detail: 'Internet connection နဲ့ Firestore ကို စစ်ပြီး ထပ်ကြိုးစားပါ။',
             );

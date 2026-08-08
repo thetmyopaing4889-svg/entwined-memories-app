@@ -91,7 +91,7 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
         stream: MemoryService.memoriesStream(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _PlaybackError(message: 'Memories ဖွင့်မရသေးဘူး');
+            return const _PlaybackError(message: 'Memories ဖွင့်မရသေးဘူး');
           }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(

@@ -5,6 +5,7 @@ import '../services/memory_service.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'memory_detail_screen.dart';
 import 'video_player_screen.dart';
+import '../services/app_settings.dart';
 
 class PlaybackScreen extends StatefulWidget {
   const PlaybackScreen({super.key});
@@ -101,9 +102,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF5F7),
-      appBar: AppBar(title: const Text('Playback')),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(title: Text(strings.playback)),
       body: StreamBuilder<List<Memory>>(
         stream: MemoryService.memoriesStream(),
         builder: (context, snapshot) {

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/child_profile.dart';
 import '../services/profile_service.dart';
 import '../services/cloudinary_service.dart';
+import '../services/app_settings.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,6 +20,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _coverPhotoUrl;
   ChildProfile? _loadedProfile;
   File? _newPhotoFile;
+  File? _newCoverFile;
 
   bool _loading = true;
   bool _saving = false;
@@ -79,6 +81,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _pickCoverPhoto() async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 85,
+        maxWidth: 1600,
+      );
+      if (picked != null && mounted) {
+        setState(() => _newCoverFile = File(picked.path));
+      }
+    } catch (_) {
+      _showSnack(AppStrings.of(context).galleryError);
+    }
+  }
+
   Future<void> _pickBirthday() async {
     final picked = await showDatePicker(
       context: context,
@@ -100,21 +117,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      _showSnack('ကလေးနာမည် ရေးပါ');
+      _showSnack(AppStrings.of(context).nameRequired);
       return;
     }
     setState(() => _saving = true);
     try {
       String? finalPhotoUrl = _photoUrl;
+      String? finalCoverPhotoUrl = _coverPhotoUrl;
       if (_newPhotoFile != null) {
         finalPhotoUrl = await CloudinaryService.uploadImage(_newPhotoFile!)
             .timeout(const Duration(seconds: 60));
+      }
+      if (_newCoverFile != null) {
+        finalCoverPhotoUrl =
+            await CloudinaryService.uploadImage(_newCoverFile!)
+                .timeout(const Duration(seconds: 60));
       }
       final savedProfile = ChildProfile(
         name: name,
         birthday: _birthday,
         photoUrl: finalPhotoUrl,
-        coverPhotoUrl: _coverPhotoUrl,
+        coverPhotoUrl: finalCoverPhotoUrl,
         beginningTitle: _loadedProfile?.beginningTitle,
         beginningSubtitle: _loadedProfile?.beginningSubtitle,
         beginningStory: _loadedProfile?.beginningStory,
@@ -124,10 +147,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await ProfileService.saveProfile(savedProfile)
           .timeout(const Duration(seconds: 20));
       if (mounted) {
-        _showSnack('Profile သိမ်းပြီးပြီ ✨');
+        _showSnack('${AppStrings.of(context).profileSaved} ✨');
         setState(() {
           _photoUrl = finalPhotoUrl;
+          _coverPhotoUrl = finalCoverPhotoUrl;
           _newPhotoFile = null;
+          _newCoverFile = null;
           _loadedProfile = savedProfile;
         });
       }
@@ -162,11 +187,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return null;
   }
 
+  ImageProvider? get _coverImage {
+    if (_newCoverFile != null) return FileImage(_newCoverFile!);
+    if (_coverPhotoUrl != null && _coverPhotoUrl!.isNotEmpty) {
+      return NetworkImage(_coverPhotoUrl!);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF5F7),
-      appBar: AppBar(title: const Text('Profile')),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(title: Text(strings.profile)),
       body: _loading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFE8A0B4)))
@@ -190,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ElevatedButton.icon(
                           onPressed: _load,
                           icon: const Icon(Icons.refresh),
-                          label: const Text('ထပ်ကြိုးစားမယ်'),
+                            label: Text(strings.retry),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFFE8A0B4),
                             foregroundColor: Colors.white,
@@ -204,6 +238,77 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
+                  GestureDetector(
+                    onTap: _pickCoverPhoto,
+                    child: Container(
+                      width: double.infinity,
+                      height: 150,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(18),
+                        image: _coverImage != null
+                            ? DecorationImage(
+                                image: _coverImage!, fit: BoxFit.cover)
+                            : null,
+                      ),
+                      child: Stack(
+                        children: [
+                          if (_coverImage == null)
+                            Center(
+                              child: Icon(
+                                Icons.landscape_outlined,
+                                size: 42,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withOpacity(0.7),
+                              ),
+                            ),
+                          Positioned(
+                            right: 12,
+                            bottom: 12,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.52),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.camera_alt_outlined,
+                                        size: 16, color: Colors.white),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      strings.changeCoverPhoto,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      strings.coverPhoto,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   GestureDetector(
                     onTap: _pickPhoto,
                     child: Stack(
@@ -243,13 +348,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 28),
-                  _label('ကလေးနာမည်'),
+                  _label(strings.childName),
                   const SizedBox(height: 8),
                   _field(
                     child: TextField(
                       controller: _nameController,
                       decoration: const InputDecoration(
-                        hintText: 'ကလေးနာမည်',
+                        hintText: strings.childName,
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(
                             horizontal: 16, vertical: 14),
@@ -257,7 +362,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  _label('မွေးနေ့'),
+                  _label(strings.birthday),
                   const SizedBox(height: 8),
                   GestureDetector(
                     onTap: _pickBirthday,
@@ -273,7 +378,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Text(
                               _birthday != null
                                   ? _formatDate(_birthday!)
-                                  : 'မွေးနေ့ ရွေးပါ',
+                                  : strings.chooseBirthday,
                               style: const TextStyle(
                                   fontSize: 15, color: Color(0xFF3D2C33)),
                             ),
@@ -301,7 +406,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               child: CircularProgressIndicator(
                                   strokeWidth: 2, color: Colors.white),
                             )
-                          : const Text('သိမ်းမယ်',
+                          : Text(strings.save,
                               style: TextStyle(
                                   fontSize: 16, fontWeight: FontWeight.w700)),
                     ),

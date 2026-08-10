@@ -2,24 +2,41 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/app_root.dart';
+import 'services/app_settings.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  runApp(const EntwinedMemoriesApp());
+  final settings = await AppSettings.load();
+  runApp(EntwinedMemoriesApp(settings: settings));
 }
 
 class EntwinedMemoriesApp extends StatelessWidget {
-  const EntwinedMemoriesApp({super.key});
+  final AppSettings settings;
+
+  const EntwinedMemoriesApp({super.key, required this.settings});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Entwined Memories',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) => AppSettingsScope(
+        settings: settings,
+        child: MaterialApp(
+          title: 'Entwined Memories',
+          debugShowCheckedModeBanner: false,
+          themeMode: settings.themeMode,
+          theme: _lightTheme,
+          darkTheme: _darkTheme,
+          home: const AppRoot(),
+        ),
+      ),
+    );
+  }
+
+  static ThemeData get _lightTheme => ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFFFB6C1),
@@ -52,8 +69,33 @@ class EntwinedMemoriesApp extends StatelessWidget {
           color: Colors.white,
         ),
         fontFamily: 'Roboto',
-      ),
-      home: const AppRoot(),
-    );
-  }
+      );
+
+  static ThemeData get _darkTheme => ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFE8A0B4),
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: const Color(0xFF21191D),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF21191D),
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          titleTextStyle: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFFFFE6ED),
+          ),
+          iconTheme: IconThemeData(color: Color(0xFFFFE6ED)),
+        ),
+        cardTheme: const CardTheme(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+          ),
+          color: Color(0xFF33272C),
+        ),
+      );
 }

@@ -3,6 +3,7 @@ import 'home_screen.dart';
 import 'profile_screen.dart';
 import 'playback_screen.dart';
 import 'settings_screen.dart';
+import '../services/app_settings.dart';
 
 /// Root shell with the bottom navigation bar: Home / Profile / Playback / Settings.
 class MainScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
     return Scaffold(
       body: IndexedStack(index: _index, children: _tabs),
       bottomNavigationBar: NavigationBar(
@@ -35,22 +37,22 @@ class _MainScreenState extends State<MainScreen> {
           NavigationDestination(
             icon: Icon(Icons.home_outlined, color: Color(0xFFB0889A)),
             selectedIcon: Icon(Icons.home, color: Color(0xFFE8A0B4)),
-            label: 'Home',
+            label: strings.home,
           ),
           NavigationDestination(
             icon: Icon(Icons.child_care_outlined, color: Color(0xFFB0889A)),
             selectedIcon: Icon(Icons.child_care, color: Color(0xFFE8A0B4)),
-            label: 'Profile',
+            label: strings.profile,
           ),
           NavigationDestination(
             icon: Icon(Icons.play_circle_outline, color: Color(0xFFB0889A)),
             selectedIcon: Icon(Icons.play_circle, color: Color(0xFFE8A0B4)),
-            label: 'Playback',
+            label: strings.playback,
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined, color: Color(0xFFB0889A)),
             selectedIcon: Icon(Icons.settings, color: Color(0xFFE8A0B4)),
-            label: 'Settings',
+            label: strings.settings,
           ),
         ],
       ),

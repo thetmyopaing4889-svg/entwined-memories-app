@@ -83,14 +83,14 @@ class AppSettingsScope extends InheritedNotifier<AppSettings> {
 }
 
 class AppStrings {
-  final AppLanguage language;
+  final AppLanguage selectedLanguage;
 
-  const AppStrings(this.language);
+  const AppStrings(this.selectedLanguage);
 
   static AppStrings of(BuildContext context) =>
       AppStrings(AppSettingsScope.of(context).language);
 
-  bool get isEnglish => language == AppLanguage.english;
+  bool get isEnglish => selectedLanguage == AppLanguage.english;
 
   String get home => isEnglish ? 'Home' : 'ပင်မ';
   String get profile => isEnglish ? 'Profile' : 'Profile';

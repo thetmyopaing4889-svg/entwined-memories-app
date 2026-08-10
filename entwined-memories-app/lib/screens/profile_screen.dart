@@ -353,7 +353,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _field(
                     child: TextField(
                       controller: _nameController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: strings.childName,
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(

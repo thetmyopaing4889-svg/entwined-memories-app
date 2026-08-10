@@ -16,7 +16,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _index = 0;
 
-  static const _tabs = [
+  static final _tabs = [
     HomeScreen(),
     ProfileScreen(),
     PlaybackScreen(),
@@ -33,7 +33,7 @@ class _MainScreenState extends State<MainScreen> {
         onDestinationSelected: (i) => setState(() => _index = i),
         backgroundColor: Colors.white,
         indicatorColor: const Color(0xFFFFE0E8),
-        destinations: const [
+        destinations: [
           NavigationDestination(
             icon: Icon(Icons.home_outlined, color: Color(0xFFB0889A)),
             selectedIcon: Icon(Icons.home, color: Color(0xFFE8A0B4)),

@@ -50,6 +50,9 @@ jobs:
           echo "=== android/app/build.gradle ==="
           cat android/app/build.gradle || echo "(not found)"
           echo ""
+           echo "=== android/app/build.gradle.kts ==="
+           cat android/app/build.gradle.kts || echo "(not found)"
+           echo ""
           echo "=== android/gradle/wrapper/gradle-wrapper.properties ==="
           cat android/gradle/wrapper/gradle-wrapper.properties || echo "(not found)"
 
@@ -119,36 +122,52 @@ jobs:
 
               write('android/settings.gradle', settings)
 
-          # ── android/app/build.gradle ──────────────────────────────────────
-          app_gradle = read('android/app/build.gradle')
+          # ── android/app/build.gradle(.kts) ────────────────────────────────
+          app_gradle_path = next(
+              (
+                  path
+                  for path in (
+                      'android/app/build.gradle.kts',
+                      'android/app/build.gradle',
+                  )
+                  if os.path.exists(path)
+              ),
+              None,
+          )
+          if app_gradle_path is None:
+              raise FileNotFoundError(
+                  'Flutter did not generate android/app/build.gradle(.kts)'
+              )
+          app_gradle = read(app_gradle_path)
+          print(f'  Using Android app Gradle file: {app_gradle_path}')
           if app_gradle is not None:
               # Firebase and image_cropper require the newer Android
               # toolchain. flutter create may generate older defaults.
               app_gradle, sdk_n = re.subn(
                   r'(?m)^(\s*)compileSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
                   rf'\g<1>compileSdk = 35', app_gradle)
-              print(f"  [app/build.gradle] compile SDK 35: {'PATCHED' if sdk_n else 'no match'}")
+              print(f"  [{app_gradle_path}] compile SDK 35: {'PATCHED' if sdk_n else 'no match'}")
               app_gradle, ndk_n = re.subn(
                   r'(?m)^(\s*)ndkVersion\s*(?:=|\s)\s*[^\n]+',
                   rf'\g<1>ndkVersion = "27.0.12077973"', app_gradle)
-              print(f"  [app/build.gradle] NDK 27: {'PATCHED' if ndk_n else 'no match'}")
+              print(f"  [{app_gradle_path}] NDK 27: {'PATCHED' if ndk_n else 'no match'}")
               app_gradle, min_n = re.subn(
                   r'(?m)^(\s*)minSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
                   rf'\g<1>minSdk = 23', app_gradle)
-              print(f"  [app/build.gradle] min SDK 23: {'PATCHED' if min_n else 'no match'}")
+              print(f"  [{app_gradle_path}] min SDK 23: {'PATCHED' if min_n else 'no match'}")
               if not re.search(
                   r'(?m)^\s*minSdk(?:Version)?\s*(?:=|\s)\s*23\b',
                   app_gradle,
               ):
                   raise RuntimeError(
-                      'android/app/build.gradle does not declare minSdk 23'
+                      f'{app_gradle_path} does not declare minSdk 23'
                   )
-              print('  [app/build.gradle] min SDK validation: OK')
+              print(f'  [{app_gradle_path}] min SDK validation: OK')
               app_gradle, n = re.subn(
                   r'(com\.google\.gms:google-services:)[\d.]+',
                   rf'\g<1>{TARGET_GMS}', app_gradle)
-              print(f"  [app/build.gradle] GMS classpath: {'PATCHED' if n else 'no match'}")
-              write('android/app/build.gradle', app_gradle)
+              print(f"  [{app_gradle_path}] GMS classpath: {'PATCHED' if n else 'no match'}")
+              write(app_gradle_path, app_gradle)
 
           # ── gradle-wrapper.properties ─────────────────────────────────────
           patch('android/gradle/wrapper/gradle-wrapper.properties', [

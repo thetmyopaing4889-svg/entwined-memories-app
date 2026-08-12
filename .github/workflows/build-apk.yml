@@ -130,8 +130,12 @@ jobs:
               print(f"  [app/build.gradle] compile SDK 35: {'PATCHED' if sdk_n else 'no match'}")
               app_gradle, ndk_n = re.subn(
                   r'(?m)^(\s*)ndkVersion\s*(?:=|\s)\s*[^\n]+',
-                  rf'\g<1>ndkVersion = "25.1.8937393"', app_gradle)
-              print(f"  [app/build.gradle] NDK 25.1: {'PATCHED' if ndk_n else 'no match'}")
+                  rf'\g<1>ndkVersion = "27.0.12077973"', app_gradle)
+              print(f"  [app/build.gradle] NDK 27: {'PATCHED' if ndk_n else 'no match'}")
+              app_gradle, min_n = re.subn(
+                  r'(?m)^(\s*)minSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
+                  rf'\g<1>minSdk = 23', app_gradle)
+              print(f"  [app/build.gradle] min SDK 23: {'PATCHED' if min_n else 'no match'}")
               app_gradle, n = re.subn(
                   r'(com\.google\.gms:google-services:)[\d.]+',
                   rf'\g<1>{TARGET_GMS}', app_gradle)

@@ -61,7 +61,7 @@ class EntwinedMemoriesApp extends StatelessWidget {
           ),
           iconTheme: IconThemeData(color: Color(0xFF3D2C33)),
         ),
-        cardTheme: const CardTheme(
+        cardTheme: const CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(20)),
@@ -90,7 +90,7 @@ class EntwinedMemoriesApp extends StatelessWidget {
           ),
           iconTheme: IconThemeData(color: Color(0xFFFFE6ED)),
         ),
-        cardTheme: const CardTheme(
+        cardTheme: const CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(20)),

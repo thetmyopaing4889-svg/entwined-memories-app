@@ -136,6 +136,14 @@ jobs:
                   r'(?m)^(\s*)minSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
                   rf'\g<1>minSdk = 23', app_gradle)
               print(f"  [app/build.gradle] min SDK 23: {'PATCHED' if min_n else 'no match'}")
+              if not re.search(
+                  r'(?m)^\s*minSdk(?:Version)?\s*(?:=|\s)\s*23\b',
+                  app_gradle,
+              ):
+                  raise RuntimeError(
+                      'android/app/build.gradle does not declare minSdk 23'
+                  )
+              print('  [app/build.gradle] min SDK validation: OK')
               app_gradle, n = re.subn(
                   r'(com\.google\.gms:google-services:)[\d.]+',
                   rf'\g<1>{TARGET_GMS}', app_gradle)

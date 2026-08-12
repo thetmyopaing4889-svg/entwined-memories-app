@@ -56,7 +56,7 @@ jobs:
           import re, os
 
           TARGET_KOTLIN  = '1.9.22'
-           TARGET_GRADLE  = 'https://services.gradle.org/distributions/gradle-8.9-all.zip'
+          TARGET_GRADLE  = 'https://services.gradle.org/distributions/gradle-8.9-all.zip'
           TARGET_AGP     = '8.3.0'
           TARGET_GMS     = '4.4.2'
 

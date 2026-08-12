@@ -195,6 +195,26 @@ jobs:
                   else:
                       print(f'  [AndroidManifest] Already has {perm}')
 
+              # image_cropper launches uCrop as a native Android activity.
+              # The plugin manifest intentionally does not auto-register it,
+              # so add it to each generated app manifest before building.
+              crop_activity_name = 'com.yalantis.ucrop.UCropActivity'
+              if crop_activity_name not in manifest:
+                  crop_activity = (
+                      '        <activity\n'
+                      '            android:name="com.yalantis.ucrop.UCropActivity"\n'
+                      '            android:screenOrientation="portrait"\n'
+                      '            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />'
+                  )
+                  manifest = manifest.replace(
+                      '</application>',
+                      f'{crop_activity}\n    </application>',
+                      1,
+                  )
+                  print('  [AndroidManifest] Added UCropActivity')
+              else:
+                  print('  [AndroidManifest] UCropActivity already present')
+
               # Add queries block for url_launcher (required Android API 30+)
               queries_block = (
                   '    <queries>\n'

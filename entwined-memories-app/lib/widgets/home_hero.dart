@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/child_profile.dart';
 import '../utils/age_calculator.dart';
 import '../utils/memory_stats.dart';
+import 'full_screen_photo_viewer.dart';
 import 'her_beginning_card.dart';
 
 /// The Home screen hero section — cover photo, child profile photo, name,
@@ -85,8 +86,17 @@ class _CoverAndAvatar extends StatelessWidget {
         clipBehavior: Clip.none,
         alignment: Alignment.topCenter,
         children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
+          GestureDetector(
+            onTap: profile.coverPhotoUrl == null ||
+                    profile.coverPhotoUrl!.isEmpty
+                ? null
+                : () => showFullScreenPhotoViewer(
+                      context,
+                      imageProvider: NetworkImage(profile.coverPhotoUrl!),
+                      semanticsLabel: 'Cover photo full screen preview',
+                    ),
+            child: ClipRRect(
+              borderRadius: const BorderRadius.only(
               bottomLeft: Radius.circular(32),
               bottomRight: Radius.circular(32),
             ),
@@ -127,9 +137,19 @@ class _CoverAndAvatar extends StatelessWidget {
               ),
             ),
           ),
+          ),
           Positioned(
             top: _coverHeight - _avatarSize / 2,
-            child: _ProfileAvatar(profile: profile, size: _avatarSize),
+            child: GestureDetector(
+              onTap: profile.photoUrl == null || profile.photoUrl!.isEmpty
+                  ? null
+                  : () => showFullScreenPhotoViewer(
+                        context,
+                        imageProvider: NetworkImage(profile.photoUrl!),
+                        semanticsLabel: 'Profile photo full screen preview',
+                      ),
+              child: _ProfileAvatar(profile: profile, size: _avatarSize),
+            ),
           ),
         ],
       ),

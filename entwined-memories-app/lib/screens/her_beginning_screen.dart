@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/child_profile.dart';
 import '../services/profile_service.dart';
+import '../widgets/full_screen_photo_viewer.dart';
 
 class HerBeginningScreen extends StatefulWidget {
   final ChildProfile profile;
@@ -63,9 +64,17 @@ class _HerBeginningScreenState extends State<HerBeginningScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 36),
         children: [
-          Container(
-            height: 230,
-            decoration: BoxDecoration(
+          GestureDetector(
+            onTap: _profile.photoUrl == null || _profile.photoUrl!.isEmpty
+                ? null
+                : () => showFullScreenPhotoViewer(
+                      context,
+                      imageProvider: NetworkImage(_profile.photoUrl!),
+                      semanticsLabel: 'Her Beginning photo full screen preview',
+                    ),
+            child: Container(
+              height: 230,
+              decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(28),
               gradient: const LinearGradient(
                 colors: [Color(0xFFFFDCE7), Color(0xFFFFF0F4)],
@@ -84,15 +93,16 @@ class _HerBeginningScreenState extends State<HerBeginningScreen> {
                     )
                   : null,
             ),
-            child: _profile.photoUrl == null || _profile.photoUrl!.isEmpty
-                ? const Center(
-                    child: Icon(
-                      Icons.child_care_rounded,
-                      size: 84,
-                      color: Color(0xFFE8A0B4),
-                    ),
-                  )
-                : null,
+              child: _profile.photoUrl == null || _profile.photoUrl!.isEmpty
+                  ? const Center(
+                      child: Icon(
+                        Icons.child_care_rounded,
+                        size: 84,
+                        color: Color(0xFFE8A0B4),
+                      ),
+                    )
+                  : null,
+            ),
           ),
           const SizedBox(height: 24),
           Text(

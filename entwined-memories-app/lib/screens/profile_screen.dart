@@ -6,6 +6,7 @@ import '../models/child_profile.dart';
 import '../services/profile_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/app_settings.dart';
+import '../widgets/full_screen_photo_viewer.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -202,6 +203,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ));
   }
 
+  void _openPhotoPreview(ImageProvider image, String label) {
+    showFullScreenPhotoViewer(
+      context,
+      imageProvider: image,
+      semanticsLabel: label,
+    );
+  }
+
   String _formatDate(DateTime d) {
     const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -270,7 +279,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 children: [
                   GestureDetector(
-                    onTap: _pickCoverPhoto,
+                    onTap: _coverImage == null
+                        ? _pickCoverPhoto
+                        : () => _openPhotoPreview(
+                              _coverImage!,
+                              'Cover photo full screen preview',
+                            ),
                     child: Container(
                       width: double.infinity,
                       height: 150,
@@ -298,28 +312,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Positioned(
                             right: 12,
                             bottom: 12,
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.52),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 8),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.camera_alt_outlined,
-                                        size: 16, color: Colors.white),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      strings.changeCoverPhoto,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w600,
+                            child: GestureDetector(
+                              onTap: _pickCoverPhoto,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.52),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.camera_alt_outlined,
+                                          size: 16, color: Colors.white),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        strings.changeCoverPhoto,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -341,7 +358,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 20),
                   GestureDetector(
-                    onTap: _pickPhoto,
+                    onTap: _avatarImage == null
+                        ? _pickPhoto
+                        : () => _openPhotoPreview(
+                              _avatarImage!,
+                              'Profile photo full screen preview',
+                            ),
                     child: Stack(
                       children: [
                         Container(
@@ -365,14 +387,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Positioned(
                           bottom: 0,
                           right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: const BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Color(0xFFE8A0B4),
+                          child: GestureDetector(
+                            onTap: _pickPhoto,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color(0xFFE8A0B4),
+                              ),
+                              child: const Icon(Icons.camera_alt,
+                                  size: 16, color: Colors.white),
                             ),
-                            child: const Icon(Icons.camera_alt,
-                                size: 16, color: Colors.white),
                           ),
                         ),
                       ],

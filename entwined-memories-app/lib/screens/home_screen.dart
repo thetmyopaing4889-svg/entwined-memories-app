@@ -95,11 +95,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _deleteMemory(String id) async {
-    await MemoryService.deleteMemory(id);
-    if (mounted) {
+    try {
+      await MemoryService.deleteMemory(id);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Memory ဖျက်ပြီးပြီ'),
         backgroundColor: Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Memory ဖျက်မရသေးဘူး။ ထပ်ကြိုးစားပါ။'),
+        backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
       ));
     }
@@ -119,37 +127,6 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => HerBeginningScreen(profile: profile),
-      ),
-    );
-  }
-
-  void _showOptions(BuildContext ctx, Memory memory) {
-    showModalBottomSheet(
-      context: ctx,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined,
-                  color: Color(0xFFE8A0B4)),
-              title: const Text('ပြင်မယ်'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _openEditMemory(memory);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: Colors.red),
-              title: const Text('ဖျက်မယ်',
-                  style: TextStyle(color: Colors.red)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _confirmDelete(memory.id);
-              },
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -307,8 +284,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       final memory = memories[index];
                       return MemoryCard(
                         memory: memory,
-                        onTap: () => _showDetail(memory),
-                        onLongPress: () => _showOptions(context, memory),
+                        onEdit: () => _openEditMemory(memory),
+                        onDelete: () => _confirmDelete(memory.id),
+                        onViewDetails: () => _showDetail(memory),
                       );
                     },
                     childCount: memories.length,

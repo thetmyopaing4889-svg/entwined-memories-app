@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/app_settings.dart';
 import '../services/memory_service.dart';
@@ -146,6 +147,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _signOut() async {
+    await FirebaseAuth.instance.signOut();
   }
 
   @override
@@ -375,6 +380,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : '$_version · For My Baby 💕',
                   ),
                 ),
+                 const SizedBox(height: 16),
+                 OutlinedButton.icon(
+                   onPressed: _signOut,
+                   icon: const Icon(Icons.logout_rounded),
+                   label: const Text('Sign out'),
+                   style: OutlinedButton.styleFrom(
+                     foregroundColor: const Color(0xFF8B3A52),
+                     side: const BorderSide(color: Color(0xFFFFC6D5)),
+                     padding: const EdgeInsets.symmetric(vertical: 13),
+                     shape: RoundedRectangleBorder(
+                       borderRadius: BorderRadius.circular(14),
+                     ),
+                   ),
+                 ),
               ],
             ),
     );

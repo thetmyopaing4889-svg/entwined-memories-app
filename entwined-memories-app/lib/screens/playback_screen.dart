@@ -269,38 +269,39 @@ class _PlaybackMemoryTile extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
-                  width: 74,
-                  height: 74,
-                  child: memory.hasVideo
-                      ? Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            YouTubeThumbnailImage(
-                              videoId: memory.videoId!,
-                              width: 74,
-                              height: 74,
-                            ),
-                            if (memory.isVideoReady)
-                              const Icon(
-                                Icons.play_circle_fill,
-                                color: Colors.white,
-                                size: 28,
+              if (memory.hasImage || memory.hasVideo) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 74,
+                    height: 74,
+                    child: memory.hasVideo
+                        ? Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              YouTubeThumbnailImage(
+                                videoId: memory.videoId!,
+                                width: 74,
+                                height: 74,
                               ),
-                          ],
-                        )
-                      : memory.hasImage
-                          ? Image.network(
-                              memory.imageUrl!,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const _TilePlaceholder(),
-                            )
-                          : const _TilePlaceholder(),
+                              if (memory.isVideoReady)
+                                const Icon(
+                                  Icons.play_circle_fill,
+                                  color: Colors.white,
+                                  size: 28,
+                                ),
+                            ],
+                          )
+                        : Image.network(
+                            memory.imageUrl!,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const _TilePlaceholder(),
+                          ),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
+                const SizedBox(width: 12),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -365,6 +366,7 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
   late final PageController _controller;
   late int _index;
   Timer? _timer;
+  bool _paused = false;
 
   @override
   void initState() {
@@ -386,7 +388,10 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
   }
 
   void _startAutoPlay() {
-    if (!mounted || widget.memories.length < 2) return;
+    if (!mounted || !widget.autoPlay || _paused || widget.memories.length < 2) {
+      return;
+    }
+    _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
       if (_index >= widget.memories.length - 1) {
@@ -398,6 +403,36 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
         curve: Curves.easeInOut,
       );
     });
+  }
+
+  void _pauseStory() {
+    if (!widget.autoPlay) return;
+    _timer?.cancel();
+    if (mounted) setState(() => _paused = true);
+  }
+
+  void _resumeStory() {
+    if (!widget.autoPlay) return;
+    if (mounted) setState(() => _paused = false);
+    _startAutoPlay();
+  }
+
+  void _nextStory() {
+    if (_index >= widget.memories.length - 1) return;
+    _controller.nextPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+    _startAutoPlay();
+  }
+
+  void _previousStory() {
+    if (_index <= 0) return;
+    _controller.previousPage(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+    _startAutoPlay();
   }
 
   void _openVideo(Memory memory) {
@@ -424,7 +459,7 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
               padding: EdgeInsets.only(right: 16),
               child: Center(
                 child: Icon(
-                  Icons.play_circle_outline,
+                  Icons.pause_circle_outline,
                   size: 20,
                   color: Colors.white70,
                 ),
@@ -432,14 +467,80 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
             ),
         ],
       ),
-      body: PageView.builder(
-        controller: _controller,
-        itemCount: widget.memories.length,
-        onPageChanged: (index) => setState(() => _index = index),
-        itemBuilder: (_, index) {
-          final memory = widget.memories[index];
-          return _StoryPage(memory: memory, onPlayVideo: () => _openVideo(memory));
-        },
+      body: Stack(
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTapUp: (details) {
+              final width = MediaQuery.sizeOf(context).width;
+              if (details.localPosition.dx < width * 0.35) {
+                _previousStory();
+              } else if (details.localPosition.dx > width * 0.65) {
+                _nextStory();
+              }
+            },
+            onLongPressStart: (_) => _pauseStory(),
+            onLongPressEnd: (_) => _resumeStory(),
+            child: PageView.builder(
+              controller: _controller,
+              itemCount: widget.memories.length,
+              onPageChanged: (index) {
+                setState(() => _index = index);
+                _startAutoPlay();
+              },
+              itemBuilder: (_, index) {
+                final memory = widget.memories[index];
+                return _StoryPage(
+                  memory: memory,
+                  onPlayVideo: () => _openVideo(memory),
+                );
+              },
+            ),
+          ),
+          Positioned(
+            top: 10,
+            left: 18,
+            right: 18,
+            child: Row(
+              children: List.generate(widget.memories.length, (index) {
+                final active = index == _index;
+                return Expanded(
+                  child: Container(
+                    height: 4,
+                    margin: EdgeInsets.only(
+                      right: index == widget.memories.length - 1 ? 0 : 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: active ? Colors.white : Colors.white30,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          if (_paused)
+            const Positioned(
+              top: 28,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.all(Radius.circular(20)),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Text(
+                      'Paused',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -461,10 +562,10 @@ class _StoryPage extends StatelessWidget {
           children: [
             Expanded(
               child: Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(24),
-                  child: memory.hasVideo
-                      ? Stack(
+                child: memory.hasVideo
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Stack(
                           alignment: Alignment.center,
                           children: [
                             YouTubeThumbnailImage(
@@ -480,16 +581,20 @@ class _StoryPage extends StatelessWidget {
                                 child: const Icon(Icons.play_arrow_rounded),
                               ),
                           ],
-                        )
-                      : memory.hasImage
-                          ? Image.network(
+                        ),
+                      )
+                    : memory.hasImage
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(24),
+                            child: Image.network(
                               memory.imageUrl!,
                               width: double.infinity,
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const _StoryMediaError(),
-                            )
-                          : const _StoryMediaError(),
-                ),
+                              errorBuilder: (_, __, ___) =>
+                                  const _StoryMediaError(),
+                            ),
+                          )
+                        : _QuoteStoryCard(memory: memory),
               ),
             ),
             Align(
@@ -522,6 +627,47 @@ class _StoryPage extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _QuoteStoryCard extends StatelessWidget {
+  final Memory memory;
+
+  const _QuoteStoryCard({required this.memory});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.fromLTRB(28, 42, 28, 42),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFE6ED), Color(0xFFFFF6F8)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.format_quote_rounded,
+              color: Color(0xFFB05A76), size: 42),
+          const SizedBox(height: 18),
+          Text(
+            memory.note.isEmpty ? 'A quiet moment worth keeping.' : memory.note,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFF3D2C33),
+              fontSize: 22,
+              height: 1.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/child_profile.dart';
 import '../services/profile_service.dart';
@@ -73,8 +74,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         imageQuality: 85,
         maxWidth: 800,
       );
-      if (picked != null && mounted) {
-        setState(() => _newPhotoFile = File(picked.path));
+      if (picked == null) return;
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop profile photo',
+            toolbarColor: const Color(0xFFE8A0B4),
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.square,
+            lockAspectRatio: true,
+          ),
+          IOSUiSettings(title: 'Crop profile photo'),
+        ],
+      );
+      if (cropped != null && mounted) {
+        setState(() => _newPhotoFile = File(cropped.path));
       }
     } catch (_) {
       _showSnack('Gallery ဖွင့်မရဘူး။ Permission စစ်ပါ။');
@@ -88,8 +104,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         imageQuality: 85,
         maxWidth: 1600,
       );
-      if (picked != null && mounted) {
-        setState(() => _newCoverFile = File(picked.path));
+      if (picked == null) return;
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Crop cover photo',
+            toolbarColor: const Color(0xFFE8A0B4),
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.ratio16x9,
+            lockAspectRatio: true,
+          ),
+          IOSUiSettings(title: 'Crop cover photo'),
+        ],
+      );
+      if (cropped != null && mounted) {
+        setState(() => _newCoverFile = File(cropped.path));
       }
     } catch (_) {
       _showSnack(AppStrings.of(context).galleryError);

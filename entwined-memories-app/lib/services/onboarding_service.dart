@@ -1,20 +1,20 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Tracks whether the first-run onboarding story (Splash → Welcome →
-/// Create Child → Parents → Creating Home → Success) has been completed
-/// on this device. Deliberately local-only for now — no auth, no
-/// per-user account state. If onboarding has not been completed the app
-/// shows the onboarding flow; otherwise it goes straight to Home.
+/// Keeps onboarding completion tied to the shared Firestore profile instead
+/// of one device's local storage. The profile itself is written by
+/// ProfileService under child_profile/info.
 class OnboardingService {
-  static const _completeKey = 'entwined_onboarding_complete';
+  static final _profileDoc =
+      FirebaseFirestore.instance.collection('child_profile').doc('info');
 
   static Future<bool> isComplete() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_completeKey) ?? false;
+    final snapshot = await _profileDoc.get();
+    return snapshot.exists && (snapshot.data()?['name'] as String? ?? '').isNotEmpty;
   }
 
-  static Future<void> markComplete() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_completeKey, true);
+  static Future<void> markComplete() {
+    // ProfileService.saveProfile is the authoritative write. This method is
+    // retained for the existing onboarding flow and needs no local flag.
+    return Future.value();
   }
 }

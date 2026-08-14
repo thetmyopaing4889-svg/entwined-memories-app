@@ -30,6 +30,7 @@ class MemoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       clipBehavior: Clip.antiAlias,
@@ -54,9 +55,9 @@ class MemoryCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         memory.formattedDate,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFFB0889A),
+                          color: colors.onSurfaceVariant,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -66,8 +67,7 @@ class MemoryCard extends StatelessWidget {
                     const SizedBox(width: 4),
                     PopupMenuButton<_MemoryAction>(
                       tooltip: 'Memory options',
-                      icon: const Icon(Icons.more_horiz,
-                          color: Color(0xFF8B3A52)),
+                      icon: Icon(Icons.more_horiz, color: colors.primary),
                       onSelected: (action) {
                         switch (action) {
                           case _MemoryAction.edit:
@@ -111,9 +111,9 @@ class MemoryCard extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   memory.note,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
-                    color: Color(0xFF3D2C33),
+                    color: colors.onSurface,
                     height: 1.75,
                     letterSpacing: 0.1,
                   ),
@@ -125,20 +125,20 @@ class MemoryCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE0E8),
+                    color: colors.primaryContainer,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.person_outline,
-                          size: 13, color: Color(0xFFB05070)),
+                      Icon(Icons.person_outline,
+                          size: 13, color: colors.onPrimaryContainer),
                       const SizedBox(width: 4),
                       Text(
                         'Added by ${memory.createdBy}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF8B3A52),
+                          color: colors.onPrimaryContainer,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -169,7 +169,8 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive ? Colors.redAccent : const Color(0xFF3D2C33);
+    final colors = Theme.of(context).colorScheme;
+    final color = isDestructive ? colors.error : colors.onSurface;
     return Row(
       children: [
         Icon(icon, size: 20, color: color),
@@ -277,6 +278,7 @@ class _ImagePreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
       label: 'Open memory photo full screen',
@@ -295,17 +297,17 @@ class _ImagePreview extends StatelessWidget {
             loadingBuilder: (_, child, progress) {
               if (progress == null) return child;
               return Container(
-                color: const Color(0xFFFFE0E8),
-                child: const Center(
+                color: colors.surfaceContainerHighest,
+                child: Center(
                   child: CircularProgressIndicator(
-                      color: Color(0xFFE8A0B4), strokeWidth: 2),
+                      color: colors.primary, strokeWidth: 2),
                 ),
               );
             },
             errorBuilder: (_, __, ___) => Container(
-              color: const Color(0xFFFFE0E8),
-              child: const Icon(Icons.broken_image_outlined,
-                  color: Color(0xFFE8A0B4), size: 48),
+              color: colors.surfaceContainerHighest,
+              child: Icon(Icons.broken_image_outlined,
+                  color: colors.primary, size: 48),
             ),
           ),
         ),

@@ -204,7 +204,7 @@ jobs:
                       '        <activity\n'
                       '            android:name="com.yalantis.ucrop.UCropActivity"\n'
                       '            android:screenOrientation="portrait"\n'
-                      '            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />'
+                      '            android:theme="@style/Theme.Entwined.UCrop" />'
                   )
                   manifest = manifest.replace(
                       '</application>',
@@ -214,6 +214,33 @@ jobs:
                   print('  [AndroidManifest] Added UCropActivity')
               else:
                   print('  [AndroidManifest] UCropActivity already present')
+
+              # Android 15 forces edge-to-edge for apps targeting API 35.
+              # uCrop does not yet handle those window insets consistently,
+              # which can place its Done/Cancel controls below the status bar.
+              # Use an immersive crop-only activity theme so its controls are
+              # always tappable without changing the Flutter app's own theme.
+              cropper_values_dir = 'android/app/src/main/res/values'
+              os.makedirs(cropper_values_dir, exist_ok=True)
+              cropper_theme_path = os.path.join(
+                  cropper_values_dir, 'entwined_ucrop_theme.xml'
+              )
+              cropper_theme = '''<?xml version="1.0" encoding="utf-8"?>
+              <resources>
+                  <style name="Theme.Entwined.UCrop" parent="Theme.AppCompat.Light.NoActionBar">
+                      <item name="android:windowFullscreen">true</item>
+                      <item name="android:windowActionModeOverlay">true</item>
+                      <item name="android:windowContentOverlay">@null</item>
+                      <item name="android:windowLayoutInDisplayCutoutMode">never</item>
+                      <item name="android:colorAccent">#E8A0B4</item>
+                  </style>
+              </resources>
+              '''
+              if read(cropper_theme_path) != cropper_theme:
+                  write(cropper_theme_path, cropper_theme)
+                  print('  [AndroidManifest] Wrote immersive UCrop theme')
+              else:
+                  print('  [AndroidManifest] immersive UCrop theme already present')
 
               # Add queries block for url_launcher (required Android API 30+)
               queries_block = (

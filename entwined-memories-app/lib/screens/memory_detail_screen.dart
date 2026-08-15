@@ -55,7 +55,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _deleting = true);
     try {
-      await MemoryService.deleteMemory(widget.memory.id);
+      await MemoryService.deleteMemory(widget.memory);
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;

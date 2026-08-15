@@ -27,6 +27,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   String? _mediaMimeType;
   _MediaType _mediaType = _MediaType.none;
   String? _existingImageUrl;
+  String? _existingImagePublicId;
   String? _existingVideoId;
 
   bool _isSaving = false;
@@ -49,6 +50,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       _selectedDate = m.date;
       _selectedMood = m.mood;
       _existingImageUrl = m.imageUrl;
+      _existingImagePublicId = m.imagePublicId;
       _existingVideoId = m.videoId;
       if (m.hasVideo) {
         _mediaType = _MediaType.video;
@@ -87,6 +89,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           _mediaMimeType = null;
           _mediaType = _MediaType.photo;
           _existingImageUrl = null;
+          _existingImagePublicId = null;
           _existingVideoId = null;
         });
       }
@@ -107,6 +110,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           _mediaMimeType = picked.mimeType;
           _mediaType = _MediaType.video;
           _existingImageUrl = null;
+          _existingImagePublicId = null;
           _existingVideoId = null;
         });
       }
@@ -120,6 +124,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         _mediaMimeType = null;
         _mediaType = _MediaType.none;
         _existingImageUrl = null;
+        _existingImagePublicId = null;
         _existingVideoId = null;
       });
 
@@ -145,13 +150,17 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
     try {
       String? finalImageUrl = _existingImageUrl;
+      String? finalImagePublicId = _existingImagePublicId;
       String? finalVideoId = _existingVideoId;
       String? finalProcessingStatus = widget.memory?.processingStatus;
 
       if (_mediaFile != null) {
         if (_mediaType == _MediaType.photo) {
           setState(() => _uploadStatus = 'ဓာတ်ပုံ Cloudinary ကို တင်နေတယ်...');
-          finalImageUrl = await CloudinaryService.uploadImage(_mediaFile!);
+          final imageUpload =
+              await CloudinaryService.uploadMemoryImage(_mediaFile!);
+          finalImageUrl = imageUpload.secureUrl;
+          finalImagePublicId = imageUpload.publicId;
           finalVideoId = null;
           finalProcessingStatus = null;
         } else if (_mediaType == _MediaType.video) {
@@ -178,6 +187,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           finalVideoId = finalVideo.videoId;
           finalProcessingStatus = finalVideo.processingStatus;
           finalImageUrl = null;
+          finalImagePublicId = null;
         }
       }
 
@@ -190,6 +200,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         createdBy: name,
         mood: _selectedMood,
         imageUrl: finalImageUrl,
+        imagePublicId: finalImagePublicId,
         videoId: finalVideoId,
         processingStatus: finalProcessingStatus,
       );

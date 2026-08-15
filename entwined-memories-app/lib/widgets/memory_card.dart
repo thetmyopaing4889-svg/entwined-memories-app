@@ -200,17 +200,12 @@ class _VideoThumbnail extends StatelessWidget {
       label: isReady ? 'Play video memory' : 'Video processing status',
       child: InkWell(
         onTap: isReady ? onTap : null,
-        child: SizedBox(
-          height: 200,
-          width: double.infinity,
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
           child: Stack(
             alignment: Alignment.center,
             children: [
-              YouTubeThumbnailImage(
-                videoId: videoId,
-                width: double.infinity,
-                height: 200,
-              ),
+              YouTubeThumbnailImage(videoId: videoId),
               Container(
                 width: 56,
                 height: 56,
@@ -288,9 +283,8 @@ class _ImagePreview extends StatelessWidget {
           imageProvider: NetworkImage(url),
           semanticsLabel: 'Memory photo full screen preview',
         ),
-        child: SizedBox(
-          height: 200,
-          width: double.infinity,
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
           child: Image.network(
             url,
             fit: BoxFit.cover,

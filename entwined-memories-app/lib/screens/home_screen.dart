@@ -94,9 +94,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _deleteMemory(String id) async {
+  Future<void> _deleteMemory(Memory memory) async {
     try {
-      await MemoryService.deleteMemory(id);
+      await MemoryService.deleteMemory(memory);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Memory ဖျက်ပြီးပြီ'),
@@ -131,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _confirmDelete(String id) {
+  void _confirmDelete(Memory memory) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -146,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _deleteMemory(id);
+              _deleteMemory(memory);
             },
             child: const Text('ဖျက်မယ်',
                 style: TextStyle(color: Colors.redAccent)),
@@ -285,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       return MemoryCard(
                         memory: memory,
                         onEdit: () => _openEditMemory(memory),
-                        onDelete: () => _confirmDelete(memory.id),
+                        onDelete: () => _confirmDelete(memory),
                         onViewDetails: () => _showDetail(memory),
                       );
                     },

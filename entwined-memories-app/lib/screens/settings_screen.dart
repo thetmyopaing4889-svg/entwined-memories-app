@@ -27,8 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final name = await MemoryService.loadCreatorName();
-    final playbackPreference = await MemoryService.loadPlaybackPreference();
+    final familySettings = await MemoryService.loadFamilySettings();
     String version = '';
     try {
       final info = await PackageInfo.fromPlatform();
@@ -39,9 +38,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     final settings = AppSettingsScope.of(context);
     setState(() {
-      _nameController.text = name;
+      _nameController.text = familySettings.creatorName;
       _version = version;
-      _playbackPreference = playbackPreference;
+      _playbackPreference = familySettings.playbackPreference;
       _themeMode = settings.themeMode;
       _language = settings.language;
       _loading = false;
@@ -58,7 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() => _saving = true);
     try {
-      await MemoryService.saveCreatorName(_nameController.text.trim());
+      await MemoryService.saveFamilySettings(
+          creatorName: _nameController.text.trim());
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(AppStrings.of(context).appSaved),
@@ -83,7 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (value == null) return;
     setState(() => _playbackPreference = value);
     try {
-      await MemoryService.savePlaybackPreference(value);
+      await MemoryService.saveFamilySettings(playbackPreference: value);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(AppStrings.of(context).isEnglish

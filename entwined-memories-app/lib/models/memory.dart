@@ -7,6 +7,9 @@ class Memory {
   final String createdBy;
   final String mood;
   final String? imageUrl; // Cloudinary URL
+  /// Cloudinary public ID used by the server-side cleanup endpoint. Older
+  /// records may not have it; the Worker then performs a guarded URL fallback.
+  final String? imagePublicId;
   final String? videoId; // YouTube video ID
   final String? processingStatus; // processing, ready, or failed
 
@@ -17,6 +20,7 @@ class Memory {
     required this.createdBy,
     required this.mood,
     this.imageUrl,
+    this.imagePublicId,
     this.videoId,
     this.processingStatus,
   });
@@ -32,6 +36,7 @@ class Memory {
         'createdBy': createdBy,
         'mood': mood,
         'imageUrl': imageUrl,
+        'imagePublicId': imagePublicId,
         'videoId': videoId,
         'processingStatus': processingStatus,
       };
@@ -45,6 +50,7 @@ class Memory {
       createdBy: data['createdBy'] as String? ?? '',
       mood: data['mood'] as String? ?? '😊',
       imageUrl: data['imageUrl'] as String?,
+      imagePublicId: data['imagePublicId'] as String?,
       videoId: data['videoId'] as String?,
       // Existing records predate this field and already contain playable
       // video IDs, so they remain ready by default.

@@ -120,7 +120,7 @@ class MemoryService {
     } catch (_) {
       // Preserve a user-safe generic error when a proxy returns non-JSON.
     }
-    throw StateError(message);
+    throw StateError('HTTP ${response.statusCode}: $message');
   }
 
   // ── Family settings (Firestore source of truth) ───────────────────────────

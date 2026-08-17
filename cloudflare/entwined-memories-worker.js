@@ -4,8 +4,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-const FIREBASE_CERTS_URL =
-  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+const FIREBASE_JWKS_URL =
+  'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -21,19 +21,10 @@ function base64UrlToBytes(value) {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function pemToArrayBuffer(pem) {
-  const normalized = pem
-    .replace('-----BEGIN CERTIFICATE-----', '')
-    .replace('-----END CERTIFICATE-----', '')
-    .replace(/\s/g, '');
-  const binary = atob(normalized);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0)).buffer;
-}
-
-async function importFirebasePublicKey(pem) {
+async function importFirebasePublicKey(jwk) {
   return crypto.subtle.importKey(
-    'spki',
-    pemToArrayBuffer(pem),
+    'jwk',
+    jwk,
     { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
     false,
     ['verify'],
@@ -72,21 +63,28 @@ async function requireFamilyUser(request, env) {
     throw new HttpError(401, 'Firebase token validation failed');
   }
 
-  let certificates;
+  let keySet;
   try {
-    const response = await fetch(FIREBASE_CERTS_URL);
-    if (!response.ok) throw new Error(`Google certificates HTTP ${response.status}`);
-    certificates = await response.json();
+    const response = await fetch(FIREBASE_JWKS_URL);
+    if (!response.ok) throw new Error(`Google signing keys HTTP ${response.status}`);
+    keySet = await response.json();
   } catch (_) {
-    throw new HttpError(503, 'Could not verify Firebase token');
+    throw new HttpError(503, 'Could not retrieve Firebase signing keys');
   }
 
-  const certificate = certificates[header.kid];
-  if (typeof certificate !== 'string') {
+  const jwk = Array.isArray(keySet.keys)
+      ? keySet.keys.find((candidate) => candidate.kid === header.kid)
+      : null;
+  if (jwk == null) {
     throw new HttpError(401, 'Firebase token signing key is unknown');
   }
 
-  const key = await importFirebasePublicKey(certificate);
+  let key;
+  try {
+    key = await importFirebasePublicKey(jwk);
+  } catch (_) {
+    throw new HttpError(503, 'Could not import Firebase signing key');
+  }
   const valid = await crypto.subtle.verify(
     'RSASSA-PKCS1-v1_5',
     key,

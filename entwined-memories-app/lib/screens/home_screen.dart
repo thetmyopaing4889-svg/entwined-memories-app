@@ -103,10 +103,11 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Color(0xFFE8A0B4),
         behavior: SnackBarBehavior.floating,
       ));
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Memory ဖျက်မရသေးဘူး။ ထပ်ကြိုးစားပါ။'),
+      final detail = error.toString().replaceFirst('Bad state: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Memory ဖျက်မရသေးဘူး: $detail'),
         backgroundColor: Colors.redAccent,
         behavior: SnackBarBehavior.floating,
       ));

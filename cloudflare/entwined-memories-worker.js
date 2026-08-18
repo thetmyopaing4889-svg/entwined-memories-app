@@ -115,6 +115,120 @@ async function parseJsonBody(request) {
   }
 }
 
+const YOUTUBE_OAUTH_CALLBACK_URL =
+  'https://entwined-memories.thetmyopaing4889.workers.dev/oauth/youtube/callback';
+const YOUTUBE_OAUTH_SCOPES = [
+  'https://www.googleapis.com/auth/youtube.readonly',
+  'https://www.googleapis.com/auth/youtube.upload',
+  'https://www.googleapis.com/auth/youtube.force-ssl',
+];
+
+function base64UrlEncode(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function htmlPage(title, message, status = 200) {
+  const escapedTitle = title.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+  const escapedMessage = message.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><title>${escapedTitle}</title>` +
+    `<main><h1>${escapedTitle}</h1><p>${escapedMessage}</p></main>`,
+    {
+      status,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
+      },
+    },
+  );
+}
+
+async function randomOAuthState() {
+  const randomBytes = new Uint8Array(32);
+  crypto.getRandomValues(randomBytes);
+  return base64UrlEncode(randomBytes);
+}
+
+async function beginYouTubeReauthorization(url, env) {
+  const bootstrapToken = url.searchParams.get('token') ?? '';
+  if (!env.YOUTUBE_OAUTH_BOOTSTRAP_TOKEN ||
+      bootstrapToken !== env.YOUTUBE_OAUTH_BOOTSTRAP_TOKEN) {
+    throw new HttpError(403, 'Invalid YouTube reauthorization link');
+  }
+  if (!env.YOUTUBE_CLIENT_ID || !env.YOUTUBE_CLIENT_SECRET || !env.YOUTUBE_OAUTH_STATE) {
+    throw new HttpError(503, 'YouTube reauthorization is not configured');
+  }
+
+  const state = await randomOAuthState();
+  await env.YOUTUBE_OAUTH_STATE.put(`state:${state}`, 'pending', {
+    expirationTtl: 600,
+  });
+
+  const authorizationUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  authorizationUrl.searchParams.set('client_id', env.YOUTUBE_CLIENT_ID);
+  authorizationUrl.searchParams.set('redirect_uri', YOUTUBE_OAUTH_CALLBACK_URL);
+  authorizationUrl.searchParams.set('response_type', 'code');
+  authorizationUrl.searchParams.set('scope', YOUTUBE_OAUTH_SCOPES.join(' '));
+  authorizationUrl.searchParams.set('access_type', 'offline');
+  authorizationUrl.searchParams.set('include_granted_scopes', 'true');
+  authorizationUrl.searchParams.set('prompt', 'consent');
+  authorizationUrl.searchParams.set('state', state);
+  return Response.redirect(authorizationUrl.toString(), 302);
+}
+
+async function completeYouTubeReauthorization(url, env) {
+  const error = url.searchParams.get('error');
+  if (error) return htmlPage('YouTube authorization was not completed', error, 400);
+
+  const state = url.searchParams.get('state') ?? '';
+  const code = url.searchParams.get('code') ?? '';
+  if (!state || !code || !env.YOUTUBE_OAUTH_STATE) {
+    return htmlPage('YouTube authorization failed', 'The authorization response was incomplete.', 400);
+  }
+
+  const pendingState = await env.YOUTUBE_OAUTH_STATE.get(`state:${state}`);
+  if (pendingState !== 'pending') {
+    return htmlPage('YouTube authorization failed', 'This authorization link has expired or was already used.', 400);
+  }
+  await env.YOUTUBE_OAUTH_STATE.delete(`state:${state}`);
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: env.YOUTUBE_CLIENT_ID,
+      client_secret: env.YOUTUBE_CLIENT_SECRET,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: YOUTUBE_OAUTH_CALLBACK_URL,
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || typeof data.refresh_token !== 'string' ||
+      data.refresh_token.length === 0) {
+    return htmlPage(
+      'YouTube authorization failed',
+      data.error_description ?? 'Google did not return a refresh token.',
+      502,
+    );
+  }
+
+  await env.YOUTUBE_OAUTH_STATE.put('youtube-refresh-token', data.refresh_token, {
+    expirationTtl: 600,
+  });
+  return htmlPage(
+    'YouTube authorization complete',
+    'You can close this page and return to the Entwined Memories task.',
+  );
+}
+
 async function requestGoogleAccessToken(env) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -204,7 +318,7 @@ async function deleteCloudinaryImage(body, env) {
 
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = await sha1Hex(
-    `public_id=${publicId}&timestamp=${timestamp}${env.CLOUDINARY_API_SECRET}`);
+    `invalidate=true&public_id=${publicId}&timestamp=${timestamp}${env.CLOUDINARY_API_SECRET}`);
   const cloudName = env.CLOUDINARY_CLOUD_NAME ?? 'txnn5lsu';
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
@@ -274,6 +388,31 @@ export default {
 
     if (url.pathname === '/' || url.pathname === '/health') {
       return json({ ok: true, service: 'entwined-memories-worker' });
+    }
+
+    if (url.pathname === '/oauth/youtube/start' && request.method === 'GET') {
+      try {
+        return await beginYouTubeReauthorization(url, env);
+      } catch (error) {
+        const status = error instanceof HttpError ? error.status : 502;
+        return htmlPage(
+          'YouTube authorization failed',
+          error instanceof Error ? error.message : 'Unknown error',
+          status,
+        );
+      }
+    }
+
+    if (url.pathname === '/oauth/youtube/callback' && request.method === 'GET') {
+      try {
+        return await completeYouTubeReauthorization(url, env);
+      } catch (error) {
+        return htmlPage(
+          'YouTube authorization failed',
+          error instanceof Error ? error.message : 'Unknown error',
+          502,
+        );
+      }
     }
 
     if (url.pathname === '/token' && request.method === 'POST') {

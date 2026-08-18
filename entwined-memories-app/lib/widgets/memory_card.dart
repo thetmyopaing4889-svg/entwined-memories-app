@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:cached_network_image/cached_network_image.dart';
+
 import '../models/memory.dart';
+import '../services/display_media_service.dart';
 import '../screens/video_player_screen.dart';
 import 'full_screen_photo_viewer.dart';
 import 'youtube_thumbnail.dart';
@@ -44,7 +47,7 @@ class MemoryCard extends StatelessWidget {
               onTap: () => _openVideo(context),
             ),
           if (!memory.hasVideo && memory.hasImage)
-            _ImagePreview(url: memory.imageUrl!),
+            _ImagePreview(memory: memory),
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -62,8 +65,7 @@ class MemoryCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    Text(memory.mood,
-                        style: const TextStyle(fontSize: 22)),
+                    Text(memory.mood, style: const TextStyle(fontSize: 22)),
                     const SizedBox(width: 4),
                     PopupMenuButton<_MemoryAction>(
                       tooltip: 'Memory options',
@@ -241,8 +243,8 @@ class _VideoThumbnail extends StatelessWidget {
                   left: 10,
                   bottom: 10,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.72),
                       borderRadius: BorderRadius.circular(8),
@@ -268,40 +270,72 @@ class _VideoThumbnail extends StatelessWidget {
 }
 
 class _ImagePreview extends StatelessWidget {
-  final String url;
-  const _ImagePreview({required this.url});
+  final Memory memory;
+  const _ImagePreview({required this.memory});
+
+  Future<void> _openPhoto(BuildContext context) async {
+    final thumbnailUrl = memory.feedThumbnailUrl!;
+    try {
+      if (memory.hasPrivateDisplay) {
+        final request = await DisplayMediaService.authorizedDisplayRequest(
+          memory.displayMediaKey!,
+        );
+        if (!context.mounted) return;
+        await showFullScreenPhotoViewer(
+          context,
+          imageProvider: CachedNetworkImageProvider(
+            request.url,
+            headers: request.headers,
+          ),
+          semanticsLabel: 'Memory photo full screen preview',
+        );
+        return;
+      }
+
+      await showFullScreenPhotoViewer(
+        context,
+        imageProvider: CachedNetworkImageProvider(thumbnailUrl),
+        semanticsLabel: 'Memory photo full screen preview',
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Full photo ဖွင့်မရသေးဘူး။ ပြန်စမ်းပါ။')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final thumbnailUrl = memory.feedThumbnailUrl!;
     return Semantics(
       button: true,
       label: 'Open memory photo full screen',
       child: InkWell(
-        onTap: () => showFullScreenPhotoViewer(
-          context,
-          imageProvider: NetworkImage(url),
-          semanticsLabel: 'Memory photo full screen preview',
-        ),
+        onTap: () => _openPhoto(context),
         child: AspectRatio(
           aspectRatio: 16 / 9,
-          child: Image.network(
-            url,
+          child: CachedNetworkImage(
+            imageUrl: thumbnailUrl,
             fit: BoxFit.cover,
-            loadingBuilder: (_, child, progress) {
-              if (progress == null) return child;
-              return Container(
-                color: colors.surfaceContainerHighest,
-                child: Center(
-                  child: CircularProgressIndicator(
-                      color: colors.primary, strokeWidth: 2),
-                ),
-              );
-            },
-            errorBuilder: (_, __, ___) => Container(
+            memCacheWidth: 960,
+            placeholder: (_, __) => Container(
               color: colors.surfaceContainerHighest,
-              child: Icon(Icons.broken_image_outlined,
-                  color: colors.primary, size: 48),
+              child: Center(
+                child: CircularProgressIndicator(
+                  color: colors.primary,
+                  strokeWidth: 2,
+                ),
+              ),
+            ),
+            errorWidget: (_, __, ___) => Container(
+              color: colors.surfaceContainerHighest,
+              child: Icon(
+                Icons.broken_image_outlined,
+                color: colors.primary,
+                size: 48,
+              ),
             ),
           ),
         ),

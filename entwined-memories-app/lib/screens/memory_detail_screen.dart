@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../services/memory_service.dart';
+import '../widgets/private_display_image.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'add_memory_screen.dart';
 import 'video_player_screen.dart';
@@ -116,11 +117,11 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
               children: [
-                if (memory.hasVideo) _VideoDetailMedia(memory: memory, onPlay: _openVideo),
+                if (memory.hasVideo)
+                  _VideoDetailMedia(memory: memory, onPlay: _openVideo),
                 if (!memory.hasVideo && memory.hasImage)
-                  _PhotoDetailMedia(url: memory.imageUrl!),
-                if (!memory.hasVideo && !memory.hasImage)
-                  const _NoMediaCard(),
+                  _PhotoDetailMedia(memory: memory),
+                if (!memory.hasVideo && !memory.hasImage) const _NoMediaCard(),
                 const SizedBox(height: 18),
                 Container(
                   padding: const EdgeInsets.all(20),
@@ -151,7 +152,8 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
                               ),
                             ),
                           ),
-                          Text(memory.mood, style: const TextStyle(fontSize: 30)),
+                          Text(memory.mood,
+                              style: const TextStyle(fontSize: 30)),
                         ],
                       ),
                       const SizedBox(height: 18),
@@ -266,32 +268,26 @@ class _VideoDetailMedia extends StatelessWidget {
 }
 
 class _PhotoDetailMedia extends StatelessWidget {
-  final String url;
+  final Memory memory;
 
-  const _PhotoDetailMedia({required this.url});
+  const _PhotoDetailMedia({required this.memory});
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(22),
-      child: Image.network(
-        url,
+      child: PrivateDisplayImage(
+        memory: memory,
         width: double.infinity,
         height: 300,
         fit: BoxFit.cover,
-        loadingBuilder: (_, child, progress) {
-          if (progress == null) return child;
-          return const SizedBox(
-            height: 300,
-            child: Center(
-              child: CircularProgressIndicator(color: Color(0xFFE8A0B4)),
-            ),
-          );
-        },
-        errorBuilder: (_, __, ___) => const SizedBox(
+        loading: const SizedBox(
           height: 300,
-          child: _MediaErrorState(),
+          child: Center(
+            child: CircularProgressIndicator(color: Color(0xFFE8A0B4)),
+          ),
         ),
+        error: const SizedBox(height: 300, child: _MediaErrorState()),
       ),
     );
   }

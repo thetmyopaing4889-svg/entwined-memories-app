@@ -6,6 +6,8 @@ import '../models/memory.dart';
 import '../services/memory_service.dart';
 import '../services/youtube_service.dart';
 import '../services/cloudinary_service.dart';
+import '../services/display_media_service.dart';
+import '../services/photo_variant_service.dart';
 
 enum _MediaType { none, photo, video }
 
@@ -27,6 +29,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   String? _mediaMimeType;
   _MediaType _mediaType = _MediaType.none;
   String? _existingImageUrl;
+  String? _existingThumbnailUrl;
+  String? _existingDisplayMediaKey;
+  int? _existingMediaProviderVersion;
   String? _existingImagePublicId;
   String? _existingVideoId;
 
@@ -50,6 +55,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       _selectedDate = m.date;
       _selectedMood = m.mood;
       _existingImageUrl = m.imageUrl;
+      _existingThumbnailUrl = m.thumbnailUrl;
+      _existingDisplayMediaKey = m.displayMediaKey;
+      _existingMediaProviderVersion = m.mediaProviderVersion;
       _existingImagePublicId = m.imagePublicId;
       _existingVideoId = m.videoId;
       if (m.hasVideo) {
@@ -78,17 +86,18 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   Future<void> _pickPhoto() async {
     try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-        maxWidth: 1200,
-      );
+      // Keep the gallery source untouched. The upload pipeline creates its own
+      // short-lived thumbnail/display copies after this selection.
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
       if (picked != null && mounted) {
         setState(() {
           _mediaFile = File(picked.path);
           _mediaMimeType = null;
           _mediaType = _MediaType.photo;
           _existingImageUrl = null;
+          _existingThumbnailUrl = null;
+          _existingDisplayMediaKey = null;
+          _existingMediaProviderVersion = null;
           _existingImagePublicId = null;
           _existingVideoId = null;
         });
@@ -110,6 +119,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           _mediaMimeType = picked.mimeType;
           _mediaType = _MediaType.video;
           _existingImageUrl = null;
+          _existingThumbnailUrl = null;
+          _existingDisplayMediaKey = null;
+          _existingMediaProviderVersion = null;
           _existingImagePublicId = null;
           _existingVideoId = null;
         });
@@ -124,6 +136,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         _mediaMimeType = null;
         _mediaType = _MediaType.none;
         _existingImageUrl = null;
+        _existingThumbnailUrl = null;
+        _existingDisplayMediaKey = null;
+        _existingMediaProviderVersion = null;
         _existingImagePublicId = null;
         _existingVideoId = null;
       });
@@ -148,19 +163,42 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       _uploadCancelled = false;
     });
 
+    CloudinaryImageUpload? uploadedThumbnail;
+    String? uploadedDisplayMediaKey;
+    PhotoUploadVariants? variants;
+    var firestoreSaved = false;
+
     try {
       String? finalImageUrl = _existingImageUrl;
+      String? finalThumbnailUrl = _existingThumbnailUrl ?? _existingImageUrl;
+      String? finalDisplayMediaKey = _existingDisplayMediaKey;
+      int? finalMediaProviderVersion = _existingMediaProviderVersion;
       String? finalImagePublicId = _existingImagePublicId;
       String? finalVideoId = _existingVideoId;
       String? finalProcessingStatus = widget.memory?.processingStatus;
 
       if (_mediaFile != null) {
         if (_mediaType == _MediaType.photo) {
-          setState(() => _uploadStatus = 'ဓာတ်ပုံ Cloudinary ကို တင်နေတယ်...');
-          final imageUpload =
-              await CloudinaryService.uploadMemoryImage(_mediaFile!);
-          finalImageUrl = imageUpload.secureUrl;
-          finalImagePublicId = imageUpload.publicId;
+          setState(() => _uploadStatus = 'Photo copies ပြင်ဆင်နေတယ်...');
+          variants = await PhotoVariantService.createVariants(_mediaFile!);
+
+          setState(() =>
+              _uploadStatus = 'Feed thumbnail ကို Cloudinary တင်နေတယ်...');
+          uploadedThumbnail = await CloudinaryService.uploadMemoryImage(
+            variants.thumbnailFile,
+          );
+
+          setState(
+              () => _uploadStatus = 'Full photo ကို private R2 တင်နေတယ်...');
+          final displayUpload = await DisplayMediaService.uploadDisplayWebp(
+            variants.displayFile,
+          );
+          uploadedDisplayMediaKey = displayUpload.key;
+          finalImageUrl = uploadedThumbnail.secureUrl;
+          finalThumbnailUrl = uploadedThumbnail.secureUrl;
+          finalDisplayMediaKey = uploadedDisplayMediaKey;
+          finalMediaProviderVersion = 1;
+          finalImagePublicId = uploadedThumbnail.publicId;
           finalVideoId = null;
           finalProcessingStatus = null;
         } else if (_mediaType == _MediaType.video) {
@@ -180,13 +218,17 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
               if (!mounted) return;
               setState(() {
                 _uploadProgress = p;
-                _uploadStatus = 'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
+                _uploadStatus =
+                    'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
               });
             },
           );
           finalVideoId = finalVideo.videoId;
           finalProcessingStatus = finalVideo.processingStatus;
           finalImageUrl = null;
+          finalThumbnailUrl = null;
+          finalDisplayMediaKey = null;
+          finalMediaProviderVersion = null;
           finalImagePublicId = null;
         }
       }
@@ -200,6 +242,9 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         createdBy: name,
         mood: _selectedMood,
         imageUrl: finalImageUrl,
+        thumbnailUrl: finalThumbnailUrl,
+        displayMediaKey: finalDisplayMediaKey,
+        mediaProviderVersion: finalMediaProviderVersion,
         imagePublicId: finalImagePublicId,
         videoId: finalVideoId,
         processingStatus: finalProcessingStatus,
@@ -207,16 +252,33 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
       if (_isEditing) {
         await MemoryService.updateMemory(memory);
+        firestoreSaved = true;
         if (mounted) Navigator.pop(context, true);
       } else {
         await MemoryService.addMemory(memory);
+        firestoreSaved = true;
         if (mounted) Navigator.pop(context);
       }
     } on YouTubeUploadCancelled {
       if (mounted) _showSnack('Upload ကို ရပ်လိုက်ပါပြီ');
     } catch (e) {
+      // If Firestore did not get a document pointing to the newly uploaded
+      // copies, remove both remote copies rather than leaving orphaned media.
+      if (!firestoreSaved && uploadedThumbnail != null) {
+        try {
+          await MemoryService.cleanupImageAssets(
+            imagePublicId: uploadedThumbnail.publicId,
+            imageUrl: uploadedThumbnail.secureUrl,
+            displayMediaKey: uploadedDisplayMediaKey,
+          );
+        } catch (_) {
+          // The memory remains unsaved and the visible error is more useful to
+          // the parent. A retry uses the Worker's idempotent cleanup flow.
+        }
+      }
       if (mounted) _showSnack('Error: $e');
     } finally {
+      await variants?.dispose();
       if (mounted) {
         setState(() {
           _isSaving = false;
@@ -284,8 +346,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                         ),
                       )
                     else
-                      const CircularProgressIndicator(
-                          color: Color(0xFFE8A0B4)),
+                      const CircularProgressIndicator(color: Color(0xFFE8A0B4)),
                     const SizedBox(height: 24),
                     Text(
                       _uploadStatus.isEmpty ? 'သိမ်းနေတယ်...' : _uploadStatus,
@@ -354,8 +415,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     runSpacing: 8,
                     children: _moods
                         .map((m) => GestureDetector(
-                              onTap: () =>
-                                  setState(() => _selectedMood = m),
+                              onTap: () => setState(() => _selectedMood = m),
                               child: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
@@ -370,8 +430,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                                   ),
                                 ),
                                 child: Text(m,
-                                    style:
-                                        const TextStyle(fontSize: 28)),
+                                    style: const TextStyle(fontSize: 28)),
                               ),
                             ))
                         .toList(),
@@ -418,8 +477,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                       decoration: const InputDecoration(
                         hintText: 'Dad / Mom / နာမည်',
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 14),
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       ),
                     ),
                   ),
@@ -446,8 +505,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     style: TextStyle(color: Colors.white, fontSize: 14)),
                 SizedBox(height: 4),
                 Text('YouTube ကို upload လုပ်မယ်',
-                    style: TextStyle(
-                        color: Colors.white54, fontSize: 12)),
+                    style: TextStyle(color: Colors.white54, fontSize: 12)),
               ],
             ),
           ),
@@ -476,8 +534,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
               fit: BoxFit.cover,
             ),
             Container(
-              decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.4)),
+              decoration: BoxDecoration(color: Colors.black.withOpacity(0.4)),
               child: const Icon(Icons.play_circle_filled,
                   color: Colors.white, size: 48),
             ),
@@ -488,9 +545,12 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     }
 
     // Existing Cloudinary image (edit mode)
-    if (_existingImageUrl != null) {
+    if ((_existingThumbnailUrl ?? _existingImageUrl) != null) {
       return _mediaTile(
-        child: Image.network(_existingImageUrl!, fit: BoxFit.cover),
+        child: Image.network(
+          _existingThumbnailUrl ?? _existingImageUrl!,
+          fit: BoxFit.cover,
+        ),
         onRemove: _removeMedia,
       );
     }
@@ -502,7 +562,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           child: _pickerBtn(
             icon: Icons.photo_library_outlined,
             label: 'ဓာတ်ပုံ',
-            sub: 'Cloudinary',
+            sub: 'Cloudinary + R2',
             onTap: _pickPhoto,
           ),
         ),
@@ -545,8 +605,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF3D2C33))),
             Text(sub,
-                style: const TextStyle(
-                    fontSize: 11, color: Color(0xFFB0889A))),
+                style: const TextStyle(fontSize: 11, color: Color(0xFFB0889A))),
           ],
         ),
       ),
@@ -559,8 +618,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          ClipRRect(
-              borderRadius: BorderRadius.circular(12), child: child),
+          ClipRRect(borderRadius: BorderRadius.circular(12), child: child),
           Positioned(
             top: 8,
             right: 8,
@@ -571,8 +629,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                 decoration: BoxDecoration(
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(8)),
-                child:
-                    const Icon(Icons.close, color: Colors.white, size: 18),
+                child: const Icon(Icons.close, color: Colors.white, size: 18),
               ),
             ),
           ),
@@ -601,8 +658,18 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   String _formatDate(DateTime d) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[d.month - 1]} ${d.day}, ${d.year}';
   }
@@ -617,9 +684,7 @@ class _Label extends StatelessWidget {
     return Text(
       text,
       style: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
-          color: Color(0xFF3D2C33)),
+          fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF3D2C33)),
     );
   }
 }

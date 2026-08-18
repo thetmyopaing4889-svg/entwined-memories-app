@@ -342,6 +342,113 @@ async function deleteCloudinaryImage(body, env) {
   return { publicId, result: data.result };
 }
 
+const MAX_DISPLAY_MEDIA_BYTES = 512 * 1024;
+const DISPLAY_MEDIA_KEY_PATTERN = /^display\/[0-9a-f-]{36}\.webp$/i;
+
+function requireDisplayMediaBucket(env) {
+  if (!env.MEMORY_DISPLAY_BUCKET) {
+    throw new HttpError(503, 'R2 display storage is not configured yet');
+  }
+  return env.MEMORY_DISPLAY_BUCKET;
+}
+
+function isValidDisplayMediaKey(value) {
+  return typeof value === 'string' && DISPLAY_MEDIA_KEY_PATTERN.test(value);
+}
+
+function displayMediaKeyFromUrl(url) {
+  const encodedKey = url.pathname.slice('/media/display/'.length);
+  if (!encodedKey) throw new HttpError(400, 'A display media key is required');
+
+  let key;
+  try {
+    key = decodeURIComponent(encodedKey);
+  } catch (_) {
+    throw new HttpError(400, 'Invalid display media key encoding');
+  }
+
+  if (!isValidDisplayMediaKey(key)) {
+    throw new HttpError(400, 'Invalid display media key');
+  }
+  return key;
+}
+
+async function uploadDisplayMedia(request, env, familyUser) {
+  const contentType = (request.headers.get('Content-Type') ?? '')
+    .split(';', 1)[0].trim().toLowerCase();
+  if (contentType !== 'image/webp') {
+    throw new HttpError(415, 'Display media must be an image/webp file');
+  }
+
+  const contentLength = Number(request.headers.get('Content-Length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_DISPLAY_MEDIA_BYTES) {
+    throw new HttpError(413, 'Display media exceeds the 512 KB upload limit');
+  }
+
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength === 0) {
+    throw new HttpError(400, 'Display media upload is empty');
+  }
+  if (bytes.byteLength > MAX_DISPLAY_MEDIA_BYTES) {
+    throw new HttpError(413, 'Display media exceeds the 512 KB upload limit');
+  }
+
+  const key = `display/${crypto.randomUUID()}.webp`;
+  const object = await requireDisplayMediaBucket(env).put(key, bytes, {
+    httpMetadata: {
+      contentType: 'image/webp',
+      cacheControl: 'private, max-age=604800',
+    },
+    customMetadata: {
+      ownerUid: familyUser.uid,
+      mediaProviderVersion: '1',
+    },
+  });
+
+  if (object == null) {
+    throw new HttpError(502, 'R2 display media upload did not complete');
+  }
+
+  return { key: object.key, size: object.size, etag: object.etag };
+}
+
+async function getDisplayMedia(request, url, env) {
+  const key = displayMediaKeyFromUrl(url);
+  const object = await requireDisplayMediaBucket(env).get(key, {
+    range: request.headers,
+  });
+
+  if (object == null) throw new HttpError(404, 'Display media was not found');
+
+  const headers = new Headers(corsHeaders);
+  object.writeHttpMetadata(headers);
+  headers.set('ETag', object.httpEtag);
+  headers.set('Cache-Control', 'private, max-age=604800');
+  headers.set('X-Content-Type-Options', 'nosniff');
+
+  if (!('body' in object)) {
+    return new Response(null, { status: 412, headers });
+  }
+
+  return new Response(object.body, {
+    status: object.range ? 206 : 200,
+    headers,
+  });
+}
+
+async function deleteDisplayMedia(body, env) {
+  const key = typeof body?.displayMediaKey === 'string'
+    ? body.displayMediaKey.trim()
+    : '';
+  if (!key) return { key: null, deleted: false };
+  if (!isValidDisplayMediaKey(key)) {
+    throw new HttpError(400, 'Invalid display media key');
+  }
+
+  await requireDisplayMediaBucket(env).delete(key);
+  return { key, deleted: true };
+}
+
 async function deleteYouTubeVideo(body, env) {
   const videoId = typeof body?.videoId === 'string' ? body.videoId.trim() : '';
   if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
@@ -501,12 +608,42 @@ export default {
       }
     }
 
+    if (url.pathname === '/media/display-upload' && request.method === 'POST') {
+      try {
+        const familyUser = await requireFamilyUser(request, env);
+        const result = await uploadDisplayMedia(request, env, familyUser);
+        return json({ ok: true, ...result }, 201);
+      } catch (error) {
+        const status = error instanceof HttpError ? error.status : 502;
+        return json({
+          error: 'Display media upload failed',
+          error_description:
+              error instanceof Error ? error.message : 'Unknown error',
+        }, status);
+      }
+    }
+
+    if (url.pathname.startsWith('/media/display/') && request.method === 'GET') {
+      try {
+        await requireFamilyUser(request, env);
+        return await getDisplayMedia(request, url, env);
+      } catch (error) {
+        const status = error instanceof HttpError ? error.status : 502;
+        return json({
+          error: 'Display media retrieval failed',
+          error_description:
+              error instanceof Error ? error.message : 'Unknown error',
+        }, status);
+      }
+    }
+
     if (url.pathname === '/delete-image' && request.method === 'POST') {
       try {
         await requireFamilyUser(request, env);
         const body = await parseJsonBody(request);
-        const result = await deleteCloudinaryImage(body, env);
-        return json({ ok: true, ...result });
+        const cloudinary = await deleteCloudinaryImage(body, env);
+        const displayMedia = await deleteDisplayMedia(body, env);
+        return json({ ok: true, ...cloudinary, displayMedia });
       } catch (error) {
         const status = error instanceof HttpError ? error.status : 502;
         return json({

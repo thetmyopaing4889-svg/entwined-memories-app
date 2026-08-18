@@ -73,6 +73,7 @@ class MemoryService {
         // Old records did not contain imagePublicId. The Worker only accepts a
         // Cloudinary URL from this configured cloud as a guarded fallback.
         'imageUrl': memory.imageUrl,
+        'displayMediaKey': memory.displayMediaKey,
       });
     }
 
@@ -83,6 +84,20 @@ class MemoryService {
     }
 
     await _col.doc(memory.id).delete();
+  }
+
+  /// Removes newly-uploaded photo copies when the Firestore write that should
+  /// reference them fails. The Worker treats repeat deletes as safe retries.
+  static Future<void> cleanupImageAssets({
+    String? imagePublicId,
+    String? imageUrl,
+    String? displayMediaKey,
+  }) {
+    return _requestMediaCleanup('delete-image', {
+      'imagePublicId': imagePublicId,
+      'imageUrl': imageUrl,
+      'displayMediaKey': displayMediaKey,
+    });
   }
 
   static Future<void> _requestMediaCleanup(

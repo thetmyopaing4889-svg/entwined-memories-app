@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
+
 import '../models/memory.dart';
 import '../services/memory_service.dart';
+import '../widgets/private_display_image.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'memory_detail_screen.dart';
 import 'video_player_screen.dart';
@@ -58,8 +62,10 @@ class _PlaybackScreenState extends State<PlaybackScreen> {
     final range = _range;
     if (range == null) return memories;
     return memories.where((memory) {
-      final date = DateTime(memory.date.year, memory.date.month, memory.date.day);
-      final start = DateTime(range.start.year, range.start.month, range.start.day);
+      final date =
+          DateTime(memory.date.year, memory.date.month, memory.date.day);
+      final start =
+          DateTime(range.start.year, range.start.month, range.start.day);
       final end = DateTime(
         range.end.year,
         range.end.month,
@@ -259,7 +265,8 @@ class _PlaybackMemoryTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasPlayableMedia = memory.hasImage || (memory.hasVideo && memory.isVideoReady);
+    final hasPlayableMedia =
+        memory.hasImage || (memory.hasVideo && memory.isVideoReady);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
@@ -292,10 +299,11 @@ class _PlaybackMemoryTile extends StatelessWidget {
                                 ),
                             ],
                           )
-                        : Image.network(
-                            memory.imageUrl!,
+                        : CachedNetworkImage(
+                            imageUrl: memory.feedThumbnailUrl!,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
+                            memCacheWidth: 160,
+                            errorWidget: (_, __, ___) =>
                                 const _TilePlaceholder(),
                           ),
                   ),
@@ -371,9 +379,7 @@ class _MemoryStoryScreenState extends State<MemoryStoryScreen> {
   @override
   void initState() {
     super.initState();
-    _index = widget.initialIndex
-        .clamp(0, widget.memories.length - 1)
-        .toInt();
+    _index = widget.initialIndex.clamp(0, widget.memories.length - 1).toInt();
     _controller = PageController(initialPage: _index);
     if (widget.autoPlay) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _startAutoPlay());
@@ -586,12 +592,15 @@ class _StoryPage extends StatelessWidget {
                     : memory.hasImage
                         ? ClipRRect(
                             borderRadius: BorderRadius.circular(24),
-                            child: Image.network(
-                              memory.imageUrl!,
-                              width: double.infinity,
+                            child: PrivateDisplayImage(
+                              memory: memory,
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) =>
-                                  const _StoryMediaError(),
+                              loading: const Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFFE8A0B4),
+                                ),
+                              ),
+                              error: const _StoryMediaError(),
                             ),
                           )
                         : _QuoteStoryCard(memory: memory),
@@ -718,7 +727,8 @@ class _PlaybackError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.cloud_off_outlined, color: Color(0xFFE8A0B4), size: 52),
+            const Icon(Icons.cloud_off_outlined,
+                color: Color(0xFFE8A0B4), size: 52),
             const SizedBox(height: 14),
             Text(
               message,
@@ -754,7 +764,8 @@ class _StoryMediaError extends StatelessWidget {
       height: 280,
       color: Colors.white10,
       child: const Center(
-        child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
+        child:
+            Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
       ),
     );
   }

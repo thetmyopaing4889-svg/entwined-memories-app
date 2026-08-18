@@ -6,7 +6,20 @@ class Memory {
   final DateTime date;
   final String createdBy;
   final String mood;
-  final String? imageUrl; // Cloudinary URL
+
+  /// Legacy Cloudinary URL retained so existing installations and old records
+  /// continue to render while the dual-provider migration rolls out.
+  final String? imageUrl;
+
+  /// Small Cloudinary WebP used for feed thumbnails. New records also mirror
+  /// this value into [imageUrl] for legacy app compatibility.
+  final String? thumbnailUrl;
+
+  /// Private R2 object key for a larger full-screen display copy. It is never a
+  /// public URL and must be requested through the authenticated Worker.
+  final String? displayMediaKey;
+  final int? mediaProviderVersion;
+
   /// Cloudinary public ID used by the server-side cleanup endpoint. Older
   /// records may not have it; the Worker then performs a guarded URL fallback.
   final String? imagePublicId;
@@ -20,13 +33,21 @@ class Memory {
     required this.createdBy,
     required this.mood,
     this.imageUrl,
+    this.thumbnailUrl,
+    this.displayMediaKey,
+    this.mediaProviderVersion,
     this.imagePublicId,
     this.videoId,
     this.processingStatus,
   });
 
   bool get hasVideo => videoId != null && videoId!.isNotEmpty;
-  bool get hasImage => imageUrl != null && imageUrl!.isNotEmpty;
+  bool get hasImage =>
+      (thumbnailUrl != null && thumbnailUrl!.isNotEmpty) ||
+      (imageUrl != null && imageUrl!.isNotEmpty);
+  String? get feedThumbnailUrl => thumbnailUrl ?? imageUrl;
+  bool get hasPrivateDisplay =>
+      displayMediaKey != null && displayMediaKey!.isNotEmpty;
   bool get isVideoReady =>
       hasVideo && (processingStatus == null || processingStatus == 'ready');
 
@@ -36,6 +57,9 @@ class Memory {
         'createdBy': createdBy,
         'mood': mood,
         'imageUrl': imageUrl,
+        'thumbnailUrl': thumbnailUrl,
+        'displayMediaKey': displayMediaKey,
+        'mediaProviderVersion': mediaProviderVersion,
         'imagePublicId': imagePublicId,
         'videoId': videoId,
         'processingStatus': processingStatus,
@@ -50,6 +74,10 @@ class Memory {
       createdBy: data['createdBy'] as String? ?? '',
       mood: data['mood'] as String? ?? '😊',
       imageUrl: data['imageUrl'] as String?,
+      thumbnailUrl:
+          data['thumbnailUrl'] as String? ?? data['imageUrl'] as String?,
+      displayMediaKey: data['displayMediaKey'] as String?,
+      mediaProviderVersion: (data['mediaProviderVersion'] as num?)?.toInt(),
       imagePublicId: data['imagePublicId'] as String?,
       videoId: data['videoId'] as String?,
       // Existing records predate this field and already contain playable

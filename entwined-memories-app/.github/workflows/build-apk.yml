@@ -119,21 +119,21 @@ jobs:
           # ── android/app/build.gradle ──────────────────────────────────────
           app_gradle = read('android/app/build.gradle')
           if app_gradle is not None:
-               # Firebase and the image cropper currently require these
-               # Android toolchain levels. flutter create may generate older
-               # values from the bundled Flutter defaults.
-               app_gradle, sdk_n = re.subn(
-                   r'(?m)^(\s*)compileSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
-                   rf'\g<1>compileSdk = 35', app_gradle)
-               print(f"  [app/build.gradle] compile SDK 35: {'PATCHED' if sdk_n else 'no match'}")
-               app_gradle, ndk_n = re.subn(
-                   r'(?m)^(\s*)ndkVersion\s*(?:=|\s)\s*[^\n]+',
-                   rf'\g<1>ndkVersion = "27.0.12077973"', app_gradle)
-               print(f"  [app/build.gradle] NDK 27: {'PATCHED' if ndk_n else 'no match'}")
-               app_gradle, min_n = re.subn(
-                   r'(?m)^(\s*)minSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
-                   rf'\g<1>minSdk = 23', app_gradle)
-               print(f"  [app/build.gradle] min SDK 23: {'PATCHED' if min_n else 'no match'}")
+              # Firebase and the image cropper currently require these
+              # Android toolchain levels. flutter create may generate older
+              # values from the bundled Flutter defaults.
+              app_gradle, sdk_n = re.subn(
+                  r'(?m)^(\s*)compileSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
+                  rf'\g<1>compileSdk = 35', app_gradle)
+              print(f"  [app/build.gradle] compile SDK 35: {'PATCHED' if sdk_n else 'no match'}")
+              app_gradle, ndk_n = re.subn(
+                  r'(?m)^(\s*)ndkVersion\s*(?:=|\s)\s*[^\n]+',
+                  rf'\g<1>ndkVersion = \"27.0.12077973\"', app_gradle)
+              print(f"  [app/build.gradle] NDK 27: {'PATCHED' if ndk_n else 'no match'}")
+              app_gradle, min_n = re.subn(
+                  r'(?m)^(\s*)minSdk(?:Version)?\s*(?:=|\s)\s*[^\n]+',
+                  rf'\g<1>minSdk = 23', app_gradle)
+              print(f"  [app/build.gradle] min SDK 23: {'PATCHED' if min_n else 'no match'}")
               app_gradle, n = re.subn(
                   r'(com\.google\.gms:google-services:)[\d.]+',
                   rf'\g<1>{TARGET_GMS}', app_gradle)

@@ -414,9 +414,14 @@ async function uploadDisplayMedia(request, env, familyUser) {
 
 async function getDisplayMedia(request, url, env) {
   const key = displayMediaKeyFromUrl(url);
-  const object = await requireDisplayMediaBucket(env).get(key, {
-    range: request.headers,
-  });
+  // R2Object.range may be populated internally even when the client never
+  // requested a byte range. Only pass a range option and emit HTTP 206 when
+  // the incoming HTTP request actually contains the Range header.
+  const hasRequestedRange = request.headers.has('Range');
+  const object = await requireDisplayMediaBucket(env).get(
+    key,
+    hasRequestedRange ? { range: request.headers } : undefined,
+  );
 
   if (object == null) throw new HttpError(404, 'Display media was not found');
 
@@ -426,12 +431,21 @@ async function getDisplayMedia(request, url, env) {
   headers.set('Cache-Control', 'private, max-age=604800');
   headers.set('X-Content-Type-Options', 'nosniff');
 
+  if (hasRequestedRange && object.range) {
+    const end = object.range.offset + object.range.length - 1;
+    headers.set('Accept-Ranges', 'bytes');
+    headers.set('Content-Range', `bytes ${object.range.offset}-${end}/${object.size}`);
+    headers.set('Content-Length', String(object.range.length));
+  } else {
+    headers.set('Content-Length', String(object.size));
+  }
+
   if (!('body' in object)) {
     return new Response(null, { status: 412, headers });
   }
 
   return new Response(object.body, {
-    status: object.range ? 206 : 200,
+    status: hasRequestedRange && object.range ? 206 : 200,
     headers,
   });
 }

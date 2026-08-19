@@ -23,6 +23,9 @@ class DisplayMediaRequest {
 class DisplayMediaService {
   static const _workerBaseUrl =
       'https://entwined-memories.thetmyopaing4889.workers.dev';
+  // Version the app-side cache key after correcting the Worker response from
+  // erroneous partial content (HTTP 206) to full-image HTTP 200 responses.
+  static const _displayCacheVersion = '2';
 
   static Future<DisplayMediaUpload> uploadDisplayWebp(File displayFile) async {
     if (!await displayFile.exists()) {
@@ -59,7 +62,8 @@ class DisplayMediaService {
     }
 
     return DisplayMediaRequest(
-      url: '$_workerBaseUrl/media/display/${Uri.encodeComponent(key)}',
+      url:
+          '$_workerBaseUrl/media/display/${Uri.encodeComponent(key)}?cacheVersion=$_displayCacheVersion',
       headers: await _authorizedHeaders(),
     );
   }

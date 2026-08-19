@@ -8,6 +8,7 @@ import '../services/youtube_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/display_media_service.dart';
 import '../services/photo_variant_service.dart';
+import '../services/original_vault_service.dart';
 
 enum _MediaType { none, photo, video }
 
@@ -27,6 +28,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   File? _mediaFile;
   final List<File> _photoFiles = [];
+  final List<String?> _photoMimeTypes = [];
   String? _mediaMimeType;
   _MediaType _mediaType = _MediaType.none;
   String? _existingImageUrl;
@@ -89,7 +91,6 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
       final existingPaths = _photoFiles.map((file) => file.path).toSet();
       final additions = picked
-          .map((file) => File(file.path))
           .where((file) => existingPaths.add(file.path))
           .toList(growable: false);
       final remaining = _maxPhotosPerMemory - _photoFiles.length;
@@ -99,8 +100,10 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         return;
       }
 
+      final accepted = additions.take(remaining).toList(growable: false);
       setState(() {
-        _photoFiles.addAll(additions.take(remaining));
+        _photoFiles.addAll(accepted.map((file) => File(file.path)));
+        _photoMimeTypes.addAll(accepted.map((file) => file.mimeType));
         _mediaFile = null;
         _mediaMimeType = null;
         _mediaType = _MediaType.photo;
@@ -128,6 +131,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         setState(() {
           _mediaFile = File(picked.path);
           _photoFiles.clear();
+          _photoMimeTypes.clear();
           _mediaMimeType = picked.mimeType;
           _mediaType = _MediaType.video;
           _existingImageUrl = null;
@@ -143,6 +147,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   void _removeMedia() => setState(() {
         _mediaFile = null;
         _photoFiles.clear();
+        _photoMimeTypes.clear();
         _mediaMimeType = null;
         _mediaType = _MediaType.none;
         _existingImageUrl = null;
@@ -153,8 +158,25 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   void _removeSelectedPhoto(int index) {
     setState(() {
       _photoFiles.removeAt(index);
+      _photoMimeTypes.removeAt(index);
       if (_photoFiles.isEmpty) _mediaType = _MediaType.none;
     });
+  }
+
+  Future<void> _archiveSelectedOriginals() async {
+    for (var i = 0; i < _photoFiles.length; i++) {
+      if (mounted) {
+        setState(() {
+          _uploadStatus =
+              'ပုံ ${i + 1} / ${_photoFiles.length} မူရင်းကို vault သို့ကူးနေတယ်...';
+        });
+      }
+      await OriginalVaultService.archiveSelectedPhoto(
+        source: _photoFiles[i],
+        memoryDate: _selectedDate,
+        mimeType: i < _photoMimeTypes.length ? _photoMimeTypes[i] : null,
+      );
+    }
   }
 
   Future<MemoryPhoto> _uploadPhoto(
@@ -243,6 +265,11 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       String? finalProcessingStatus = widget.memory?.processingStatus;
 
       if (_photoFiles.isNotEmpty) {
+        // A selected source photo must be preserved locally before any lossy
+        // variant is created or any cloud provider receives data. A failure
+        // throws here and aborts the whole memory save without remote uploads.
+        await _archiveSelectedOriginals();
+
         if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
         for (var i = 0; i < _photoFiles.length; i++) {
           uploadedPhotos.add(await _uploadPhoto(

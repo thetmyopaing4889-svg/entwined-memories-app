@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'package:cached_network_image/cached_network_image.dart';
-
 import '../models/memory.dart';
 import '../screens/video_player_screen.dart';
+import 'memory_photo_collage.dart';
 import 'memory_photo_gallery.dart';
 import 'youtube_thumbnail.dart';
 
@@ -82,30 +81,31 @@ class MemoryCard extends StatelessWidget {
                             break;
                         }
                       },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(
-                          value: _MemoryAction.edit,
-                          child: _MenuItem(
-                            icon: Icons.edit_outlined,
-                            label: 'ပြင်မယ်',
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: _MemoryAction.delete,
-                          child: _MenuItem(
-                            icon: Icons.delete_outline,
-                            label: 'ဖျက်မယ်',
-                            isDestructive: true,
-                          ),
-                        ),
-                        PopupMenuItem(
-                          value: _MemoryAction.detail,
-                          child: _MenuItem(
-                            icon: Icons.open_in_new_rounded,
-                            label: 'အသေးစိတ်ကြည့်မယ်',
-                          ),
-                        ),
-                      ],
+                      itemBuilder:
+                          (context) => const [
+                            PopupMenuItem(
+                              value: _MemoryAction.edit,
+                              child: _MenuItem(
+                                icon: Icons.edit_outlined,
+                                label: 'ပြင်မယ်',
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _MemoryAction.delete,
+                              child: _MenuItem(
+                                icon: Icons.delete_outline,
+                                label: 'ဖျက်မယ်',
+                                isDestructive: true,
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _MemoryAction.detail,
+                              child: _MenuItem(
+                                icon: Icons.open_in_new_rounded,
+                                label: 'အသေးစိတ်ကြည့်မယ်',
+                              ),
+                            ),
+                          ],
                     ),
                   ],
                 ),
@@ -123,8 +123,10 @@ class MemoryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: colors.primaryContainer,
                     borderRadius: BorderRadius.circular(20),
@@ -132,8 +134,11 @@ class MemoryCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.person_outline,
-                          size: 13, color: colors.onPrimaryContainer),
+                      Icon(
+                        Icons.person_outline,
+                        size: 13,
+                        color: colors.onPrimaryContainer,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Added by ${memory.createdBy}',
@@ -224,17 +229,22 @@ class _VideoThumbnail extends StatelessWidget {
                 top: 10,
                 right: 10,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.red,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: const Text('YouTube',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700)),
+                  child: const Text(
+                    'YouTube',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
               if (!isReady)
@@ -242,8 +252,10 @@ class _VideoThumbnail extends StatelessWidget {
                   left: 10,
                   bottom: 10,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withOpacity(0.72),
                       borderRadius: BorderRadius.circular(8),
@@ -273,73 +285,14 @@ class _ImagePreview extends StatelessWidget {
   const _ImagePreview({required this.memory});
 
   Future<void> _openPhoto(BuildContext context) {
-    return showMemoryPhotoGallery(
-      context,
-      photos: memory.allPhotos,
-    );
+    return showMemoryPhotoGallery(context, photos: memory.allPhotos);
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final thumbnailUrl = memory.feedThumbnailUrl!;
-    return Semantics(
-      button: true,
-      label: 'Open memory photo full screen',
-      child: InkWell(
-        onTap: () => _openPhoto(context),
-        child: AspectRatio(
-          aspectRatio: 16 / 9,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              CachedNetworkImage(
-                imageUrl: thumbnailUrl,
-                fit: BoxFit.cover,
-                memCacheWidth: 960,
-                placeholder: (_, __) => Container(
-                  color: colors.surfaceContainerHighest,
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: colors.primary,
-                      strokeWidth: 2,
-                    ),
-                  ),
-                ),
-                errorWidget: (_, __, ___) => Container(
-                  color: colors.surfaceContainerHighest,
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    color: colors.primary,
-                    size: 48,
-                  ),
-                ),
-              ),
-              if (memory.photoCount > 1)
-                Positioned(
-                  right: 10,
-                  bottom: 10,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Text(
-                      'ဓာတ်ပုံ ${memory.photoCount} ပုံ',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
+    return MemoryPhotoCollage(
+      photos: memory.allPhotos,
+      onTap: () => _openPhoto(context),
     );
   }
 }

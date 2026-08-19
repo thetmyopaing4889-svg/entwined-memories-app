@@ -1,5 +1,52 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// A single photo copy pair within a memory gallery.
+///
+/// The Cloudinary thumbnail keeps the feed quick, while [displayMediaKey]
+/// identifies the private R2 copy used for full-screen viewing. Neither field
+/// contains the original gallery photo from the parent's device.
+class MemoryPhoto {
+  final String? imageUrl;
+  final String? thumbnailUrl;
+  final String? displayMediaKey;
+  final int? mediaProviderVersion;
+  final String? imagePublicId;
+
+  const MemoryPhoto({
+    this.imageUrl,
+    this.thumbnailUrl,
+    this.displayMediaKey,
+    this.mediaProviderVersion,
+    this.imagePublicId,
+  });
+
+  bool get hasImage =>
+      (thumbnailUrl != null && thumbnailUrl!.isNotEmpty) ||
+      (imageUrl != null && imageUrl!.isNotEmpty);
+  String? get feedThumbnailUrl => thumbnailUrl ?? imageUrl;
+  bool get hasPrivateDisplay =>
+      displayMediaKey != null && displayMediaKey!.isNotEmpty;
+
+  Map<String, dynamic> toMap() => {
+        'imageUrl': imageUrl,
+        'thumbnailUrl': thumbnailUrl,
+        'displayMediaKey': displayMediaKey,
+        'mediaProviderVersion': mediaProviderVersion,
+        'imagePublicId': imagePublicId,
+      };
+
+  factory MemoryPhoto.fromMap(Map<String, dynamic> data) {
+    return MemoryPhoto(
+      imageUrl: data['imageUrl'] as String?,
+      thumbnailUrl:
+          data['thumbnailUrl'] as String? ?? data['imageUrl'] as String?,
+      displayMediaKey: data['displayMediaKey'] as String?,
+      mediaProviderVersion: (data['mediaProviderVersion'] as num?)?.toInt(),
+      imagePublicId: data['imagePublicId'] as String?,
+    );
+  }
+}
+
 class Memory {
   final String id;
   final String note;
@@ -7,22 +54,18 @@ class Memory {
   final String createdBy;
   final String mood;
 
-  /// Legacy Cloudinary URL retained so existing installations and old records
-  /// continue to render while the dual-provider migration rolls out.
+  /// Legacy singular fields are retained for old app installs and existing
+  /// Firestore documents. New gallery memories mirror their cover photo here.
   final String? imageUrl;
-
-  /// Small Cloudinary WebP used for feed thumbnails. New records also mirror
-  /// this value into [imageUrl] for legacy app compatibility.
   final String? thumbnailUrl;
-
-  /// Private R2 object key for a larger full-screen display copy. It is never a
-  /// public URL and must be requested through the authenticated Worker.
   final String? displayMediaKey;
   final int? mediaProviderVersion;
-
-  /// Cloudinary public ID used by the server-side cleanup endpoint. Older
-  /// records may not have it; the Worker then performs a guarded URL fallback.
   final String? imagePublicId;
+
+  /// New gallery field. Old documents have no [photos] array and safely derive
+  /// one gallery item from their legacy singular fields through [allPhotos].
+  final List<MemoryPhoto> photos;
+
   final String? videoId; // YouTube video ID
   final String? processingStatus; // processing, ready, or failed
 
@@ -37,17 +80,32 @@ class Memory {
     this.displayMediaKey,
     this.mediaProviderVersion,
     this.imagePublicId,
+    this.photos = const [],
     this.videoId,
     this.processingStatus,
   });
 
   bool get hasVideo => videoId != null && videoId!.isNotEmpty;
-  bool get hasImage =>
-      (thumbnailUrl != null && thumbnailUrl!.isNotEmpty) ||
-      (imageUrl != null && imageUrl!.isNotEmpty);
-  String? get feedThumbnailUrl => thumbnailUrl ?? imageUrl;
-  bool get hasPrivateDisplay =>
-      displayMediaKey != null && displayMediaKey!.isNotEmpty;
+
+  /// Gallery data for new records, or a one-item compatibility gallery for
+  /// older one-photo records.
+  List<MemoryPhoto> get allPhotos {
+    if (photos.isNotEmpty) return List.unmodifiable(photos);
+    final legacyPhoto = MemoryPhoto(
+      imageUrl: imageUrl,
+      thumbnailUrl: thumbnailUrl,
+      displayMediaKey: displayMediaKey,
+      mediaProviderVersion: mediaProviderVersion,
+      imagePublicId: imagePublicId,
+    );
+    return legacyPhoto.hasImage ? [legacyPhoto] : const [];
+  }
+
+  int get photoCount => allPhotos.length;
+  MemoryPhoto? get coverPhoto => allPhotos.isEmpty ? null : allPhotos.first;
+  bool get hasImage => allPhotos.isNotEmpty;
+  String? get feedThumbnailUrl => coverPhoto?.feedThumbnailUrl;
+  bool get hasPrivateDisplay => coverPhoto?.hasPrivateDisplay ?? false;
   bool get isVideoReady =>
       hasVideo && (processingStatus == null || processingStatus == 'ready');
 
@@ -61,12 +119,24 @@ class Memory {
         'displayMediaKey': displayMediaKey,
         'mediaProviderVersion': mediaProviderVersion,
         'imagePublicId': imagePublicId,
+        if (photos.isNotEmpty)
+          'photos': photos.map((photo) => photo.toMap()).toList(),
         'videoId': videoId,
         'processingStatus': processingStatus,
       };
 
   factory Memory.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    final rawPhotos = data['photos'];
+    final photos = rawPhotos is List
+        ? rawPhotos
+            .whereType<Map>()
+            .map((photo) =>
+                MemoryPhoto.fromMap(Map<String, dynamic>.from(photo)))
+            .where((photo) => photo.hasImage)
+            .toList(growable: false)
+        : const <MemoryPhoto>[];
+
     return Memory(
       id: doc.id,
       note: data['note'] as String? ?? '',
@@ -79,6 +149,7 @@ class Memory {
       displayMediaKey: data['displayMediaKey'] as String?,
       mediaProviderVersion: (data['mediaProviderVersion'] as num?)?.toInt(),
       imagePublicId: data['imagePublicId'] as String?,
+      photos: photos,
       videoId: data['videoId'] as String?,
       // Existing records predate this field and already contain playable
       // video IDs, so they remain ready by default.

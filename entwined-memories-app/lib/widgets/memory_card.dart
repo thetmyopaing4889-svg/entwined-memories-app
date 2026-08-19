@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../models/memory.dart';
-import '../services/display_media_service.dart';
 import '../screens/video_player_screen.dart';
-import 'full_screen_photo_viewer.dart';
+import 'memory_photo_gallery.dart';
 import 'youtube_thumbnail.dart';
 
 class MemoryCard extends StatelessWidget {
@@ -273,36 +272,11 @@ class _ImagePreview extends StatelessWidget {
   final Memory memory;
   const _ImagePreview({required this.memory});
 
-  Future<void> _openPhoto(BuildContext context) async {
-    final thumbnailUrl = memory.feedThumbnailUrl!;
-    try {
-      if (memory.hasPrivateDisplay) {
-        final request = await DisplayMediaService.authorizedDisplayRequest(
-          memory.displayMediaKey!,
-        );
-        if (!context.mounted) return;
-        await showFullScreenPhotoViewer(
-          context,
-          imageProvider: CachedNetworkImageProvider(
-            request.url,
-            headers: request.headers,
-          ),
-          semanticsLabel: 'Memory photo full screen preview',
-        );
-        return;
-      }
-
-      await showFullScreenPhotoViewer(
-        context,
-        imageProvider: CachedNetworkImageProvider(thumbnailUrl),
-        semanticsLabel: 'Memory photo full screen preview',
-      );
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Full photo ဖွင့်မရသေးဘူး။ ပြန်စမ်းပါ။')),
-      );
-    }
+  Future<void> _openPhoto(BuildContext context) {
+    return showMemoryPhotoGallery(
+      context,
+      photos: memory.allPhotos,
+    );
   }
 
   @override
@@ -316,27 +290,53 @@ class _ImagePreview extends StatelessWidget {
         onTap: () => _openPhoto(context),
         child: AspectRatio(
           aspectRatio: 16 / 9,
-          child: CachedNetworkImage(
-            imageUrl: thumbnailUrl,
-            fit: BoxFit.cover,
-            memCacheWidth: 960,
-            placeholder: (_, __) => Container(
-              color: colors.surfaceContainerHighest,
-              child: Center(
-                child: CircularProgressIndicator(
-                  color: colors.primary,
-                  strokeWidth: 2,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: thumbnailUrl,
+                fit: BoxFit.cover,
+                memCacheWidth: 960,
+                placeholder: (_, __) => Container(
+                  color: colors.surfaceContainerHighest,
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: colors.primary,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  color: colors.surfaceContainerHighest,
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: colors.primary,
+                    size: 48,
+                  ),
                 ),
               ),
-            ),
-            errorWidget: (_, __, ___) => Container(
-              color: colors.surfaceContainerHighest,
-              child: Icon(
-                Icons.broken_image_outlined,
-                color: colors.primary,
-                size: 48,
-              ),
-            ),
+              if (memory.photoCount > 1)
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Text(
+                      'ဓာတ်ပုံ ${memory.photoCount} ပုံ',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ),

@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 
 import '../models/memory.dart';
 import '../services/memory_service.dart';
-import '../widgets/private_display_image.dart';
+import '../widgets/memory_photo_gallery.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'memory_detail_screen.dart';
 import 'video_player_screen.dart';
@@ -590,17 +590,51 @@ class _StoryPage extends StatelessWidget {
                         ),
                       )
                     : memory.hasImage
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(24),
-                            child: PrivateDisplayImage(
-                              memory: memory,
-                              fit: BoxFit.contain,
-                              loading: const Center(
-                                child: CircularProgressIndicator(
-                                  color: Color(0xFFE8A0B4),
-                                ),
+                        ? InkWell(
+                            onTap: () => showMemoryPhotoGallery(
+                              context,
+                              photos: memory.allPhotos,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(24),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  PrivateMemoryPhotoImage(
+                                    photo: memory.coverPhoto!,
+                                    fit: BoxFit.contain,
+                                    loading: const Center(
+                                      child: CircularProgressIndicator(
+                                        color: Color(0xFFE8A0B4),
+                                      ),
+                                    ),
+                                    error: const _StoryPhotoError(),
+                                  ),
+                                  if (memory.photoCount > 1)
+                                    Positioned(
+                                      right: 12,
+                                      bottom: 12,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black54,
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: Text(
+                                          'ဓာတ်ပုံ ${memory.photoCount} ပုံ',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
-                              error: const _StoryMediaError(),
                             ),
                           )
                         : _QuoteStoryCard(memory: memory),
@@ -742,6 +776,17 @@ class _PlaybackError extends StatelessWidget {
   }
 }
 
+class _StoryPhotoError extends StatelessWidget {
+  const _StoryPhotoError();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
+    );
+  }
+}
+
 class _TilePlaceholder extends StatelessWidget {
   const _TilePlaceholder();
 
@@ -750,23 +795,6 @@ class _TilePlaceholder extends StatelessWidget {
     return Container(
       color: const Color(0xFFFFE6ED),
       child: const Icon(Icons.photo_outlined, color: Color(0xFFE8A0B4)),
-    );
-  }
-}
-
-class _StoryMediaError extends StatelessWidget {
-  const _StoryMediaError();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: 280,
-      color: Colors.white10,
-      child: const Center(
-        child:
-            Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
-      ),
     );
   }
 }

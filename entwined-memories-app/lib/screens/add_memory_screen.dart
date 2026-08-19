@@ -26,13 +26,11 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   String _selectedMood = '😊';
 
   File? _mediaFile;
+  final List<File> _photoFiles = [];
   String? _mediaMimeType;
   _MediaType _mediaType = _MediaType.none;
   String? _existingImageUrl;
   String? _existingThumbnailUrl;
-  String? _existingDisplayMediaKey;
-  int? _existingMediaProviderVersion;
-  String? _existingImagePublicId;
   String? _existingVideoId;
 
   bool _isSaving = false;
@@ -44,6 +42,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   static const _moods = ['😊', '😍', '🥹', '😄', '🥰', '😌', '🎉', '💕'];
   static const int _maxNote = 500;
+  static const int _maxPhotosPerMemory = 10;
 
   @override
   void initState() {
@@ -56,9 +55,6 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       _selectedMood = m.mood;
       _existingImageUrl = m.imageUrl;
       _existingThumbnailUrl = m.thumbnailUrl;
-      _existingDisplayMediaKey = m.displayMediaKey;
-      _existingMediaProviderVersion = m.mediaProviderVersion;
-      _existingImagePublicId = m.imagePublicId;
       _existingVideoId = m.videoId;
       if (m.hasVideo) {
         _mediaType = _MediaType.video;
@@ -88,19 +84,34 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     try {
       // Keep the gallery source untouched. The upload pipeline creates its own
       // short-lived thumbnail/display copies after this selection.
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked != null && mounted) {
-        setState(() {
-          _mediaFile = File(picked.path);
-          _mediaMimeType = null;
-          _mediaType = _MediaType.photo;
-          _existingImageUrl = null;
-          _existingThumbnailUrl = null;
-          _existingDisplayMediaKey = null;
-          _existingMediaProviderVersion = null;
-          _existingImagePublicId = null;
-          _existingVideoId = null;
-        });
+      final picked = await ImagePicker().pickMultiImage();
+      if (picked.isEmpty || !mounted) return;
+
+      final existingPaths = _photoFiles.map((file) => file.path).toSet();
+      final additions = picked
+          .map((file) => File(file.path))
+          .where((file) => existingPaths.add(file.path))
+          .toList(growable: false);
+      final remaining = _maxPhotosPerMemory - _photoFiles.length;
+      if (remaining <= 0) {
+        _showSnack(
+            'Memory တစ်ခုလျှင် ပုံ $_maxPhotosPerMemory ပုံအထိပဲရွေးလို့ရတယ်');
+        return;
+      }
+
+      setState(() {
+        _photoFiles.addAll(additions.take(remaining));
+        _mediaFile = null;
+        _mediaMimeType = null;
+        _mediaType = _MediaType.photo;
+        _existingImageUrl = null;
+        _existingThumbnailUrl = null;
+        _existingVideoId = null;
+      });
+
+      if (additions.length > remaining) {
+        _showSnack(
+            'ပထမ $remaining ပုံသာ ထည့်ပေးလိုက်တယ် (max $_maxPhotosPerMemory ပုံ)');
       }
     } catch (_) {
       if (mounted) _showSnack('Gallery ဖွင့်မရဘူး။ Permission စစ်ပါ။');
@@ -116,13 +127,11 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       if (picked != null && mounted) {
         setState(() {
           _mediaFile = File(picked.path);
+          _photoFiles.clear();
           _mediaMimeType = picked.mimeType;
           _mediaType = _MediaType.video;
           _existingImageUrl = null;
           _existingThumbnailUrl = null;
-          _existingDisplayMediaKey = null;
-          _existingMediaProviderVersion = null;
-          _existingImagePublicId = null;
           _existingVideoId = null;
         });
       }
@@ -133,15 +142,76 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
   void _removeMedia() => setState(() {
         _mediaFile = null;
+        _photoFiles.clear();
         _mediaMimeType = null;
         _mediaType = _MediaType.none;
         _existingImageUrl = null;
         _existingThumbnailUrl = null;
-        _existingDisplayMediaKey = null;
-        _existingMediaProviderVersion = null;
-        _existingImagePublicId = null;
         _existingVideoId = null;
       });
+
+  void _removeSelectedPhoto(int index) {
+    setState(() {
+      _photoFiles.removeAt(index);
+      if (_photoFiles.isEmpty) _mediaType = _MediaType.none;
+    });
+  }
+
+  Future<MemoryPhoto> _uploadPhoto(
+    File source, {
+    required int index,
+    required int total,
+  }) async {
+    PhotoUploadVariants? variants;
+    CloudinaryImageUpload? thumbnail;
+    try {
+      if (mounted) {
+        setState(
+            () => _uploadStatus = 'ပုံ $index / $total ကို ပြင်ဆင်နေတယ်...');
+      }
+      variants = await PhotoVariantService.createVariants(source);
+
+      if (mounted) {
+        setState(() =>
+            _uploadStatus = 'ပုံ $index / $total thumbnail ကို တင်နေတယ်...');
+      }
+      thumbnail = await CloudinaryService.uploadMemoryImage(
+        variants.thumbnailFile,
+      );
+
+      if (mounted) {
+        setState(() =>
+            _uploadStatus = 'ပုံ $index / $total full photo ကို တင်နေတယ်...');
+      }
+      final display = await DisplayMediaService.uploadDisplayWebp(
+        variants.displayFile,
+      );
+
+      return MemoryPhoto(
+        imageUrl: thumbnail.secureUrl,
+        thumbnailUrl: thumbnail.secureUrl,
+        displayMediaKey: display.key,
+        mediaProviderVersion: 1,
+        imagePublicId: thumbnail.publicId,
+      );
+    } catch (_) {
+      // The gallery item is not added to [uploadedPhotos] until both providers
+      // succeed, so clean a thumbnail that failed before its R2 pair existed.
+      if (thumbnail != null) {
+        try {
+          await MemoryService.cleanupImageAssets(
+            imagePublicId: thumbnail.publicId,
+            imageUrl: thumbnail.secureUrl,
+          );
+        } catch (_) {
+          // Idempotent Worker cleanup can be retried later if the network drops.
+        }
+      }
+      rethrow;
+    } finally {
+      await variants?.dispose();
+    }
+  }
 
   Future<void> _saveMemory() async {
     final note = _noteController.text.trim();
@@ -163,76 +233,56 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       _uploadCancelled = false;
     });
 
-    CloudinaryImageUpload? uploadedThumbnail;
-    String? uploadedDisplayMediaKey;
-    PhotoUploadVariants? variants;
+    final uploadedPhotos = <MemoryPhoto>[];
+    final replacedPhotos = <MemoryPhoto>[];
     var firestoreSaved = false;
 
     try {
-      String? finalImageUrl = _existingImageUrl;
-      String? finalThumbnailUrl = _existingThumbnailUrl ?? _existingImageUrl;
-      String? finalDisplayMediaKey = _existingDisplayMediaKey;
-      int? finalMediaProviderVersion = _existingMediaProviderVersion;
-      String? finalImagePublicId = _existingImagePublicId;
+      var finalPhotos = _isEditing ? widget.memory!.allPhotos : <MemoryPhoto>[];
       String? finalVideoId = _existingVideoId;
       String? finalProcessingStatus = widget.memory?.processingStatus;
 
-      if (_mediaFile != null) {
-        if (_mediaType == _MediaType.photo) {
-          setState(() => _uploadStatus = 'Photo copies ပြင်ဆင်နေတယ်...');
-          variants = await PhotoVariantService.createVariants(_mediaFile!);
-
-          setState(() =>
-              _uploadStatus = 'Feed thumbnail ကို Cloudinary တင်နေတယ်...');
-          uploadedThumbnail = await CloudinaryService.uploadMemoryImage(
-            variants.thumbnailFile,
-          );
-
-          setState(
-              () => _uploadStatus = 'Full photo ကို private R2 တင်နေတယ်...');
-          final displayUpload = await DisplayMediaService.uploadDisplayWebp(
-            variants.displayFile,
-          );
-          uploadedDisplayMediaKey = displayUpload.key;
-          finalImageUrl = uploadedThumbnail.secureUrl;
-          finalThumbnailUrl = uploadedThumbnail.secureUrl;
-          finalDisplayMediaKey = uploadedDisplayMediaKey;
-          finalMediaProviderVersion = 1;
-          finalImagePublicId = uploadedThumbnail.publicId;
-          finalVideoId = null;
-          finalProcessingStatus = null;
-        } else if (_mediaType == _MediaType.video) {
-          setState(() {
-            _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
-            _uploadProgress = 0;
-          });
-          final dateStr =
-              '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-          final finalVideo = await YouTubeService.uploadVideo(
-            videoFile: _mediaFile!,
-            title: 'Memory $dateStr',
-            description: note,
-            mimeType: _mediaMimeType,
-            isCancelled: () => _uploadCancelled,
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() {
-                _uploadProgress = p;
-                _uploadStatus =
-                    'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
-              });
-            },
-          );
-          finalVideoId = finalVideo.videoId;
-          finalProcessingStatus = finalVideo.processingStatus;
-          finalImageUrl = null;
-          finalThumbnailUrl = null;
-          finalDisplayMediaKey = null;
-          finalMediaProviderVersion = null;
-          finalImagePublicId = null;
+      if (_photoFiles.isNotEmpty) {
+        if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
+        for (var i = 0; i < _photoFiles.length; i++) {
+          uploadedPhotos.add(await _uploadPhoto(
+            _photoFiles[i],
+            index: i + 1,
+            total: _photoFiles.length,
+          ));
         }
+        finalPhotos = uploadedPhotos;
+        finalVideoId = null;
+        finalProcessingStatus = null;
+      } else if (_mediaFile != null && _mediaType == _MediaType.video) {
+        if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
+        setState(() {
+          _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
+          _uploadProgress = 0;
+        });
+        final dateStr =
+            '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
+        final finalVideo = await YouTubeService.uploadVideo(
+          videoFile: _mediaFile!,
+          title: 'Memory $dateStr',
+          description: note,
+          mimeType: _mediaMimeType,
+          isCancelled: () => _uploadCancelled,
+          onProgress: (p) {
+            if (!mounted) return;
+            setState(() {
+              _uploadProgress = p;
+              _uploadStatus =
+                  'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
+            });
+          },
+        );
+        finalVideoId = finalVideo.videoId;
+        finalProcessingStatus = finalVideo.processingStatus;
+        finalPhotos = <MemoryPhoto>[];
       }
 
+      final cover = finalPhotos.isEmpty ? null : finalPhotos.first;
       await MemoryService.saveCreatorName(name);
 
       final memory = Memory(
@@ -241,11 +291,12 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         date: _selectedDate,
         createdBy: name,
         mood: _selectedMood,
-        imageUrl: finalImageUrl,
-        thumbnailUrl: finalThumbnailUrl,
-        displayMediaKey: finalDisplayMediaKey,
-        mediaProviderVersion: finalMediaProviderVersion,
-        imagePublicId: finalImagePublicId,
+        imageUrl: cover?.imageUrl,
+        thumbnailUrl: cover?.thumbnailUrl,
+        displayMediaKey: cover?.displayMediaKey,
+        mediaProviderVersion: cover?.mediaProviderVersion,
+        imagePublicId: cover?.imagePublicId,
+        photos: finalPhotos,
         videoId: finalVideoId,
         processingStatus: finalProcessingStatus,
       );
@@ -253,6 +304,16 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       if (_isEditing) {
         await MemoryService.updateMemory(memory);
         firestoreSaved = true;
+        // Only after Firestore points at the replacement media do we remove
+        // old copies. A cleanup interruption cannot make the memory disappear.
+        if (replacedPhotos.isNotEmpty) {
+          try {
+            await MemoryService.cleanupImageAssetsBatch(replacedPhotos);
+          } catch (_) {
+            // The new memory is valid. A failed idempotent cleanup is safer
+            // than rolling back the updated Firestore document.
+          }
+        }
         if (mounted) Navigator.pop(context, true);
       } else {
         await MemoryService.addMemory(memory);
@@ -262,23 +323,18 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     } on YouTubeUploadCancelled {
       if (mounted) _showSnack('Upload ကို ရပ်လိုက်ပါပြီ');
     } catch (e) {
-      // If Firestore did not get a document pointing to the newly uploaded
-      // copies, remove both remote copies rather than leaving orphaned media.
-      if (!firestoreSaved && uploadedThumbnail != null) {
+      // The Firestore document is created only after every photo copy upload
+      // succeeds. On any failure, remove all new remote copies as a batch.
+      if (!firestoreSaved && uploadedPhotos.isNotEmpty) {
         try {
-          await MemoryService.cleanupImageAssets(
-            imagePublicId: uploadedThumbnail.publicId,
-            imageUrl: uploadedThumbnail.secureUrl,
-            displayMediaKey: uploadedDisplayMediaKey,
-          );
+          await MemoryService.cleanupImageAssetsBatch(uploadedPhotos);
         } catch (_) {
-          // The memory remains unsaved and the visible error is more useful to
-          // the parent. A retry uses the Worker's idempotent cleanup flow.
+          // The Worker delete route is idempotent, so a future cleanup retry is
+          // safe even if a mobile network interruption happened here.
         }
       }
       if (mounted) _showSnack('Error: $e');
     } finally {
-      await variants?.dispose();
       if (mounted) {
         setState(() {
           _isSaving = false;
@@ -490,6 +546,70 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
   }
 
   Widget _buildMediaSection() {
+    if (_photoFiles.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _photoFiles.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) => ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Image.file(_photoFiles[index], fit: BoxFit.cover),
+                  Positioned(
+                    top: 5,
+                    right: 5,
+                    child: Material(
+                      color: Colors.black54,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        onTap: () => _removeSelectedPhoto(index),
+                        customBorder: const CircleBorder(),
+                        child: const Padding(
+                          padding: EdgeInsets.all(5),
+                          child:
+                              Icon(Icons.close, color: Colors.white, size: 16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Text(
+                '${_photoFiles.length} / $_maxPhotosPerMemory ပုံရွေးပြီး',
+                style: const TextStyle(
+                  color: Color(0xFF8B3A52),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _photoFiles.length >= _maxPhotosPerMemory
+                    ? null
+                    : _pickPhoto,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                label: const Text('ထပ်ရွေးမယ်'),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
     // Local video file selected
     if (_mediaFile != null && _mediaType == _MediaType.video) {
       return _mediaTile(
@@ -561,8 +681,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         Expanded(
           child: _pickerBtn(
             icon: Icons.photo_library_outlined,
-            label: 'ဓာတ်ပုံ',
-            sub: 'Cloudinary + R2',
+            label: 'ဓာတ်ပုံများ',
+            sub: 'အများဆုံး 10 ပုံ',
             onTap: _pickPhoto,
           ),
         ),

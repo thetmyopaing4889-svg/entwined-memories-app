@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/memory.dart';
 import '../services/memory_service.dart';
-import '../widgets/private_display_image.dart';
+import '../widgets/memory_photo_gallery.dart';
 import '../widgets/youtube_thumbnail.dart';
 import 'add_memory_screen.dart';
 import 'video_player_screen.dart';
@@ -274,21 +274,11 @@ class _PhotoDetailMedia extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
+    return MemoryPhotoGallery(
+      photos: memory.allPhotos,
+      height: 300,
       borderRadius: BorderRadius.circular(22),
-      child: PrivateDisplayImage(
-        memory: memory,
-        width: double.infinity,
-        height: 300,
-        fit: BoxFit.cover,
-        loading: const SizedBox(
-          height: 300,
-          child: Center(
-            child: CircularProgressIndicator(color: Color(0xFFE8A0B4)),
-          ),
-        ),
-        error: const SizedBox(height: 300, child: _MediaErrorState()),
-      ),
+      fit: BoxFit.cover,
     );
   }
 }

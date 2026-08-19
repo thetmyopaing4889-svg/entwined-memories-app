@@ -67,14 +67,12 @@ class MemoryService {
   /// failure deliberately leaves the memory document intact, so the user can
   /// retry rather than silently leaving an untracked photo or video behind.
   static Future<void> deleteMemory(Memory memory) async {
-    if (memory.hasImage) {
-      await _requestMediaCleanup('delete-image', {
-        'imagePublicId': memory.imagePublicId,
-        // Old records did not contain imagePublicId. The Worker only accepts a
-        // Cloudinary URL from this configured cloud as a guarded fallback.
-        'imageUrl': memory.imageUrl,
-        'displayMediaKey': memory.displayMediaKey,
-      });
+    for (final photo in memory.allPhotos) {
+      await cleanupImageAssets(
+        imagePublicId: photo.imagePublicId,
+        imageUrl: photo.imageUrl,
+        displayMediaKey: photo.displayMediaKey,
+      );
     }
 
     if (memory.hasVideo) {
@@ -98,6 +96,21 @@ class MemoryService {
       'imageUrl': imageUrl,
       'displayMediaKey': displayMediaKey,
     });
+  }
+
+  /// Cleans up every newly-uploaded photo copy after a failed all-or-nothing
+  /// gallery save. Cleanup is sequential to avoid a burst of concurrent
+  /// authenticated Worker requests on a parent's mobile connection.
+  static Future<void> cleanupImageAssetsBatch(
+    Iterable<MemoryPhoto> photos,
+  ) async {
+    for (final photo in photos) {
+      await cleanupImageAssets(
+        imagePublicId: photo.imagePublicId,
+        imageUrl: photo.imageUrl,
+        displayMediaKey: photo.displayMediaKey,
+      );
+    }
   }
 
   static Future<void> _requestMediaCleanup(

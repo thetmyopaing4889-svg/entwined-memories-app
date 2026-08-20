@@ -35,6 +35,12 @@ jobs:
       - name: Scaffold Flutter project (creates android/ if missing)
         run: flutter create --project-name entwined_memories --org com.entwinedmemories . --platforms android
 
+      - name: Install Original Vault Android bridge
+        run: |
+          target="android/app/src/main/kotlin/com/entwinedmemories/entwined_memories/MainActivity.kt"
+          mkdir -p "$(dirname "$target")"
+          cp android_templates/MainActivity.kt "$target"
+
       - name: Write google-services.json
         run: |
           echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json

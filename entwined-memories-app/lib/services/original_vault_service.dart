@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-/// Metadata for one original photo safely written to the shared family vault.
+/// Metadata for one original media file safely written to the shared family vault.
 class OriginalVaultArchive {
   final String uri;
   final String sha256;
@@ -26,8 +26,8 @@ class OriginalVaultArchive {
   }
 }
 
-/// Preserves only user-selected original images in Android shared Pictures
-/// storage. This bridge never enumerates or uploads the user's whole gallery.
+/// Preserves only user-selected original photos and videos in Android shared
+/// Pictures storage. This bridge never enumerates or uploads the full gallery.
 class OriginalVaultService {
   OriginalVaultService._();
 
@@ -37,21 +37,49 @@ class OriginalVaultService {
     required File source,
     required DateTime memoryDate,
     String? mimeType,
+  }) {
+    return _archiveSelectedMedia(
+      method: 'archiveOriginalPhoto',
+      source: source,
+      memoryDate: memoryDate,
+      mimeType: mimeType,
+      unreadableMessage: 'ရွေးထားတဲ့မူရင်းပုံကို မဖတ်နိုင်တော့ဘူး။',
+    );
+  }
+
+  static Future<OriginalVaultArchive> archiveSelectedVideo({
+    required File source,
+    required DateTime memoryDate,
+    String? mimeType,
+  }) {
+    return _archiveSelectedMedia(
+      method: 'archiveOriginalVideo',
+      source: source,
+      memoryDate: memoryDate,
+      mimeType: mimeType,
+      unreadableMessage: 'ရွေးထားတဲ့မူရင်း Video ကို မဖတ်နိုင်တော့ဘူး။',
+    );
+  }
+
+  static Future<OriginalVaultArchive> _archiveSelectedMedia({
+    required String method,
+    required File source,
+    required DateTime memoryDate,
+    required String unreadableMessage,
+    String? mimeType,
   }) async {
     if (!await source.exists()) {
-      throw StateError('ရွေးထားတဲ့မူရင်းပုံကို မဖတ်နိုင်တော့ဘူး။');
+      throw StateError(unreadableMessage);
     }
 
     try {
-      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'archiveOriginalPhoto',
-        <String, Object?>{
-          'sourcePath': source.path,
-          'year': memoryDate.year,
-          'month': memoryDate.month,
-          'mimeType': mimeType,
-        },
-      );
+      final result = await _channel
+          .invokeMethod<Map<Object?, Object?>>(method, <String, Object?>{
+            'sourcePath': source.path,
+            'year': memoryDate.year,
+            'month': memoryDate.month,
+            'mimeType': mimeType,
+          });
       if (result == null) {
         throw StateError('Original Vault က response မပေးပါ။');
       }

@@ -57,6 +57,45 @@ void main() {
     expect(archive.alreadyExists, isFalse);
   });
 
+  test('archives only the selected video with its memory month', () async {
+    final source = File(
+      '${Directory.systemTemp.path}/entwined-original-vault-test.mp4',
+    );
+    await source.writeAsBytes(<int>[5, 6, 7, 8, 9]);
+    addTearDown(() async {
+      if (await source.exists()) await source.delete();
+    });
+
+    MethodCall? received;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      received = call;
+      return <String, Object>{
+        'uri': 'content://media/external/video/media/84',
+        'sha256': List<String>.filled(64, 'b').join(),
+        'bytes': 5,
+        'alreadyExists': false,
+      };
+    });
+
+    final archive = await OriginalVaultService.archiveSelectedVideo(
+      source: source,
+      memoryDate: DateTime(2025, 12, 1),
+      mimeType: 'video/mp4',
+    );
+
+    expect(received?.method, 'archiveOriginalVideo');
+    expect(received?.arguments, <String, Object?>{
+      'sourcePath': source.path,
+      'year': 2025,
+      'month': 12,
+      'mimeType': 'video/mp4',
+    });
+    expect(archive.uri, 'content://media/external/video/media/84');
+    expect(archive.bytes, 5);
+    expect(archive.alreadyExists, isFalse);
+  });
+
   test('does not invoke Android when the selected source is unavailable',
       () async {
     final missing = File(

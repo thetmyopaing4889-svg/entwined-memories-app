@@ -179,6 +179,24 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     }
   }
 
+  Future<void> _archiveSelectedVideo() async {
+    final video = _mediaFile;
+    if (video == null) {
+      throw StateError('ရွေးထားတဲ့မူရင်း Video ကို မတွေ့တော့ဘူး။');
+    }
+    if (mounted) {
+      setState(() {
+        _uploadStatus = 'Video မူရင်းကို vault သို့ကူးနေတယ်...';
+        _uploadProgress = null;
+      });
+    }
+    await OriginalVaultService.archiveSelectedVideo(
+      source: video,
+      memoryDate: _selectedDate,
+      mimeType: _mediaMimeType,
+    );
+  }
+
   Future<MemoryPhoto> _uploadPhoto(
     File source, {
     required int index,
@@ -282,6 +300,10 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         finalVideoId = null;
         finalProcessingStatus = null;
       } else if (_mediaFile != null && _mediaType == _MediaType.video) {
+        // A selected source video must be preserved locally before YouTube
+        // receives data. A vault failure aborts this save with no remote upload.
+        await _archiveSelectedVideo();
+
         if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
         setState(() {
           _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
@@ -651,7 +673,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
                 Text('Video ရွေးပြီးပြီ',
                     style: TextStyle(color: Colors.white, fontSize: 14)),
                 SizedBox(height: 4),
-                Text('YouTube ကို upload လုပ်မယ်',
+                Text('မူရင်း Vault → YouTube',
                     style: TextStyle(color: Colors.white54, fontSize: 12)),
               ],
             ),
@@ -718,7 +740,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           child: _pickerBtn(
             icon: Icons.videocam_outlined,
             label: 'Video',
-            sub: 'YouTube',
+            sub: 'Vault → YouTube',
             onTap: _pickVideo,
           ),
         ),

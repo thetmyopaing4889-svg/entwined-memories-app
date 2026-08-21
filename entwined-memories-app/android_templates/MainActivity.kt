@@ -2,10 +2,12 @@ package com.entwinedmemories.entwined_memories
 
 import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,7 +29,13 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     companion object {
         private const val VAULT_CHANNEL = "entwined_memories/original_vault"
+        private const val JOURNAL_CHANNEL = "entwined_memories/family_journal"
         private const val VAULT_ROOT = "Pictures/Entwined Memories Originals"
+        private const val JOURNAL_PREFERENCES = "family_memory_journal"
+        private const val JOURNAL_TREE_URI_KEY = "archive_tree_uri"
+        private const val JOURNAL_ROOT_DIRECTORY = "Entwined Memories Archive"
+        private const val JOURNAL_EVENTS_DIRECTORY = "Journal Events"
+        private const val JOURNAL_FOLDER_REQUEST_CODE = 9421
     }
 
     private enum class VaultMediaKind(
@@ -41,6 +49,7 @@ class MainActivity : FlutterActivity() {
 
     private val vaultExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingJournalFolderResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -55,6 +64,39 @@ class MainActivity : FlutterActivity() {
                 }
                 archive(call, result, mediaKind)
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, JOURNAL_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isArchiveFolderSelected" -> result.success(journalTreeUri() != null)
+                    "ensureArchiveFolderSelected" -> ensureJournalFolderSelected(result)
+                    "appendJournalEvent" -> appendJournalEvent(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != JOURNAL_FOLDER_REQUEST_CODE) return
+
+        val pendingResult = pendingJournalFolderResult ?: return
+        pendingJournalFolderResult = null
+        val treeUri = data?.data
+        if (resultCode != RESULT_OK || treeUri == null) {
+            pendingResult.error("journal_folder_cancelled", "No Family Memory Journal folder was selected.", null)
+            return
+        }
+
+        try {
+            val grantedFlags = data.flags and (
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            contentResolver.takePersistableUriPermission(treeUri, grantedFlags)
+            journalPreferences().edit().putString(JOURNAL_TREE_URI_KEY, treeUri.toString()).apply()
+            pendingResult.success(mapOf("configured" to true, "treeUri" to treeUri.toString()))
+        } catch (error: Exception) {
+            pendingResult.error("journal_folder_failed", error.message, null)
+        }
     }
 
     private fun archive(
@@ -99,8 +141,135 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pendingJournalFolderResult?.error(
+            "journal_folder_interrupted",
+            "Family Memory Journal folder selection was interrupted.",
+            null,
+        )
+        pendingJournalFolderResult = null
         vaultExecutor.shutdownNow()
         super.onDestroy()
+    }
+
+    private fun journalPreferences() = getSharedPreferences(JOURNAL_PREFERENCES, MODE_PRIVATE)
+
+    private fun journalTreeUri(): Uri? {
+        val raw = journalPreferences().getString(JOURNAL_TREE_URI_KEY, null) ?: return null
+        return runCatching { Uri.parse(raw) }.getOrNull()
+    }
+
+    private fun ensureJournalFolderSelected(result: MethodChannel.Result) {
+        if (journalTreeUri() != null) {
+            result.success(mapOf("configured" to true))
+            return
+        }
+        if (pendingJournalFolderResult != null) {
+            result.error("journal_folder_busy", "Family Memory Journal folder picker is already open.", null)
+            return
+        }
+
+        pendingJournalFolderResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            }
+            startActivityForResult(intent, JOURNAL_FOLDER_REQUEST_CODE)
+        } catch (error: Exception) {
+            pendingJournalFolderResult = null
+            result.error("journal_folder_failed", error.message, null)
+        }
+    }
+
+    private fun appendJournalEvent(call: MethodCall, result: MethodChannel.Result) {
+        val fileName = call.argument<String>("fileName")
+        val json = call.argument<String>("json")
+        if (fileName.isNullOrBlank() || json == null) {
+            result.error("invalid_journal_arguments", "Journal event arguments are incomplete.", null)
+            return
+        }
+        if (!fileName.matches(Regex("event_[0-9]+_[0-9a-f-]{36}\\.json"))) {
+            result.error("invalid_journal_filename", "Journal event filename is invalid.", null)
+            return
+        }
+        val treeUri = journalTreeUri()
+        if (treeUri == null) {
+            result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
+            return
+        }
+
+        vaultExecutor.execute {
+            try {
+                val uri = writeJournalEvent(treeUri, fileName, json)
+                mainHandler.post { result.success(mapOf("fileName" to fileName, "uri" to uri.toString())) }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("journal_write_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun writeJournalEvent(treeUri: Uri, fileName: String, json: String): Uri {
+        val root = treeDocumentUri(treeUri)
+        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        val eventsDirectory = ensureJournalDirectory(archiveDirectory, JOURNAL_EVENTS_DIRECTORY)
+        val eventUri = DocumentsContract.createDocument(
+            contentResolver,
+            eventsDirectory,
+            "application/json",
+            fileName,
+        ) ?: throw IllegalStateException("Android could not create the Family Memory Journal event file.")
+
+        try {
+            contentResolver.openOutputStream(eventUri, "w")?.bufferedWriter(Charsets.UTF_8).use { writer ->
+                if (writer == null) {
+                    throw IllegalStateException("Android could not write the Family Memory Journal event file.")
+                }
+                writer.write(json)
+                writer.flush()
+            }
+            return eventUri
+        } catch (error: Exception) {
+            contentResolver.delete(eventUri, null, null)
+            throw error
+        }
+    }
+
+    private fun treeDocumentUri(treeUri: Uri): Uri = DocumentsContract.buildDocumentUriUsingTree(
+        treeUri,
+        DocumentsContract.getTreeDocumentId(treeUri),
+    )
+
+    private fun ensureJournalDirectory(parentUri: Uri, displayName: String): Uri {
+        findJournalChild(parentUri, displayName)?.let { child -> return child }
+        return DocumentsContract.createDocument(
+            contentResolver,
+            parentUri,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            displayName,
+        ) ?: throw IllegalStateException("Android could not create the Family Memory Journal directory.")
+    }
+
+    private fun findJournalChild(parentUri: Uri, displayName: String): Uri? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            while (cursor.moveToNext()) {
+                if (cursor.getString(nameColumn) == displayName) {
+                    return DocumentsContract.buildDocumentUriUsingTree(parentUri, cursor.getString(idColumn))
+                }
+            }
+        }
+        return null
     }
 
     private fun archiveOriginal(

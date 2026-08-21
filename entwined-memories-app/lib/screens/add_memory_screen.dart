@@ -9,6 +9,7 @@ import '../services/cloudinary_service.dart';
 import '../services/display_media_service.dart';
 import '../services/photo_variant_service.dart';
 import '../services/original_vault_service.dart';
+import '../services/family_memory_journal_service.dart';
 
 enum _MediaType { none, photo, video }
 
@@ -163,7 +164,8 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
     });
   }
 
-  Future<void> _archiveSelectedOriginals() async {
+  Future<List<OriginalVaultArchive>> _archiveSelectedOriginals() async {
+    final archives = <OriginalVaultArchive>[];
     for (var i = 0; i < _photoFiles.length; i++) {
       if (mounted) {
         setState(() {
@@ -171,15 +173,16 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
               'ပုံ ${i + 1} / ${_photoFiles.length} မူရင်းကို vault သို့ကူးနေတယ်...';
         });
       }
-      await OriginalVaultService.archiveSelectedPhoto(
+      archives.add(await OriginalVaultService.archiveSelectedPhoto(
         source: _photoFiles[i],
         memoryDate: _selectedDate,
         mimeType: i < _photoMimeTypes.length ? _photoMimeTypes[i] : null,
-      );
+      ));
     }
+    return archives;
   }
 
-  Future<void> _archiveSelectedVideo() async {
+  Future<OriginalVaultArchive> _archiveSelectedVideo() async {
     final video = _mediaFile;
     if (video == null) {
       throw StateError('ရွေးထားတဲ့မူရင်း Video ကို မတွေ့တော့ဘူး။');
@@ -190,7 +193,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         _uploadProgress = null;
       });
     }
-    await OriginalVaultService.archiveSelectedVideo(
+    return OriginalVaultService.archiveSelectedVideo(
       source: video,
       memoryDate: _selectedDate,
       mimeType: _mediaMimeType,
@@ -275,9 +278,13 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
     final uploadedPhotos = <MemoryPhoto>[];
     final replacedPhotos = <MemoryPhoto>[];
+    final vaultArchives = <OriginalVaultArchive>[];
     var firestoreSaved = false;
 
     try {
+      setState(() => _uploadStatus = 'Family Memory Journal folder ကိုစစ်နေတယ်...');
+      await FamilyMemoryJournalService.ensureArchiveFolderSelected();
+
       var finalPhotos = _isEditing ? widget.memory!.allPhotos : <MemoryPhoto>[];
       String? finalVideoId = _existingVideoId;
       String? finalProcessingStatus = widget.memory?.processingStatus;
@@ -286,7 +293,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         // A selected source photo must be preserved locally before any lossy
         // variant is created or any cloud provider receives data. A failure
         // throws here and aborts the whole memory save without remote uploads.
-        await _archiveSelectedOriginals();
+        vaultArchives.addAll(await _archiveSelectedOriginals());
 
         if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
         for (var i = 0; i < _photoFiles.length; i++) {
@@ -302,7 +309,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       } else if (_mediaFile != null && _mediaType == _MediaType.video) {
         // A selected source video must be preserved locally before YouTube
         // receives data. A vault failure aborts this save with no remote upload.
-        await _archiveSelectedVideo();
+        vaultArchives.add(await _archiveSelectedVideo());
 
         if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
         setState(() {
@@ -351,7 +358,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
       );
 
       if (_isEditing) {
-        await MemoryService.updateMemory(memory);
+        await MemoryService.updateMemory(memory, vaultArchives: vaultArchives);
         firestoreSaved = true;
         // Only after Firestore points at the replacement media do we remove
         // old copies. A cleanup interruption cannot make the memory disappear.
@@ -365,7 +372,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
         }
         if (mounted) Navigator.pop(context, true);
       } else {
-        await MemoryService.addMemory(memory);
+        await MemoryService.addMemory(memory, vaultArchives: vaultArchives);
         firestoreSaved = true;
         if (mounted) Navigator.pop(context);
       }

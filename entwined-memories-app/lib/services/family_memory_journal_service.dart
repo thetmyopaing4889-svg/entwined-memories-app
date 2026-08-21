@@ -1,0 +1,138 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
+
+import '../models/memory.dart';
+import 'original_vault_service.dart';
+
+/// A durable, append-only local event written outside Firebase so a family can
+/// reconstruct the meaning of a Memory even if the online database is later
+/// unavailable. Event files are intentionally plain JSON for future portability.
+class FamilyMemoryJournalService {
+  FamilyMemoryJournalService._();
+
+  static const _channel = MethodChannel('entwined_memories/family_journal');
+  static const _schemaVersion = 1;
+  static const _uuid = Uuid();
+
+  /// Opens Android's system folder picker only when a parent has not selected a
+  /// shared Documents folder on this phone yet. The returned folder URI is never
+  /// uploaded or written to Firestore.
+  static Future<void> ensureArchiveFolderSelected() async {
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'ensureArchiveFolderSelected',
+      );
+      if (result == null || result['configured'] != true) {
+        throw StateError('Family Memory Journal folder ကိုမရွေးရသေးဘူး။');
+      }
+    } on PlatformException catch (error) {
+      throw StateError(
+        error.message ?? 'Family Memory Journal folder ရွေးမရဘူး။',
+      );
+    }
+  }
+
+  static Future<bool> isArchiveFolderSelected() async {
+    try {
+      return await _channel.invokeMethod<bool>('isArchiveFolderSelected') ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Saves one immutable event file. Previous records are never overwritten or
+  /// removed by this app, allowing future exports to reconstruct the timeline.
+  static Future<String> appendMemoryEvent({
+    required String eventType,
+    required Memory memory,
+    Iterable<OriginalVaultArchive> vaultArchives = const [],
+    Map<String, Object?> extra = const {},
+  }) async {
+    final now = DateTime.now().toUtc();
+    final eventId = _uuid.v4();
+    final event = <String, Object?>{
+      'schemaVersion': _schemaVersion,
+      'eventId': eventId,
+      'eventType': eventType,
+      'occurredAtUtc': now.toIso8601String(),
+      'memory': _memoryMap(memory),
+      'vaultArchives': vaultArchives.map(_vaultMap).toList(growable: false),
+      if (extra.isNotEmpty) 'extra': extra,
+    };
+
+    final fileName = 'event_${now.microsecondsSinceEpoch}_$eventId.json';
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'appendJournalEvent',
+        <String, Object?>{
+          'fileName': fileName,
+          'json': const JsonEncoder.withIndent('  ').convert(event),
+        },
+      );
+      final writtenName = result?['fileName'] as String?;
+      if (writtenName == null || writtenName.isEmpty) {
+        throw StateError('Family Memory Journal file အတည်ပြုချက်မရဘူး။');
+      }
+      return writtenName;
+    } on PlatformException catch (error) {
+      throw StateError(
+        error.message ?? 'Family Memory Journal ကိုမသိမ်းနိုင်ဘူး။',
+      );
+    }
+  }
+
+  static Future<void> appendDeletionRequested(Memory memory) async {
+    await appendMemoryEvent(
+      eventType: 'memory_delete_requested',
+      memory: memory,
+    );
+  }
+
+  static Future<void> appendDeleted(Memory memory) async {
+    await appendMemoryEvent(eventType: 'memory_deleted', memory: memory);
+  }
+
+  static Map<String, Object?> _memoryMap(Memory memory) => {
+    'id': memory.id,
+    'dateLocal': _dateOnly(memory.date),
+    'dateUtc': memory.date.toUtc().toIso8601String(),
+    'note': memory.note,
+    'mood': memory.mood,
+    'createdBy': memory.createdBy,
+    'photos': memory.allPhotos
+        .map(
+          (photo) => <String, Object?>{
+            'thumbnailUrl': photo.thumbnailUrl,
+            'imageUrl': photo.imageUrl,
+            'displayMediaKey': photo.displayMediaKey,
+            'mediaProviderVersion': photo.mediaProviderVersion,
+            'imagePublicId': photo.imagePublicId,
+          },
+        )
+        .toList(growable: false),
+    'video':
+        memory.hasVideo
+            ? <String, Object?>{
+              'youtubeVideoId': memory.videoId,
+              'processingStatus': memory.processingStatus,
+            }
+            : null,
+  };
+
+  static Map<String, Object?> _vaultMap(OriginalVaultArchive archive) => {
+    'uri': archive.uri,
+    'sha256': archive.sha256,
+    'bytes': archive.bytes,
+    'alreadyExisted': archive.alreadyExists,
+  };
+
+  static String _dateOnly(DateTime date) {
+    final local = date.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day';
+  }
+}

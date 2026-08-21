@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/memory.dart';
+import 'family_memory_journal_service.dart';
+import 'original_vault_service.dart';
 
 class FamilySettingsData {
   final String creatorName;
@@ -42,14 +44,54 @@ class MemoryService {
 
   // ── CRUD ─────────────────────────────────────────────────────────────────
 
-  /// Save a new memory to Firestore (uses memory.id as document ID)
-  static Future<void> addMemory(Memory memory) async {
+  /// Writes a local journal intent before Firestore. If the online save later
+  /// fails, the family still has an on-device record of what was attempted.
+  /// A confirmed event is appended after a successful remote write; a failure
+  /// to append that second event never rolls back a valid Firestore memory.
+  static Future<void> addMemory(
+    Memory memory, {
+    Iterable<OriginalVaultArchive> vaultArchives = const [],
+  }) async {
+    final archives = List<OriginalVaultArchive>.unmodifiable(vaultArchives);
+    await FamilyMemoryJournalService.appendMemoryEvent(
+      eventType: 'memory_create_intent',
+      memory: memory,
+      vaultArchives: archives,
+    );
     await _col.doc(memory.id).set(memory.toMap());
+    try {
+      await FamilyMemoryJournalService.appendMemoryEvent(
+        eventType: 'memory_created',
+        memory: memory,
+        vaultArchives: archives,
+      );
+    } catch (_) {
+      // The local intent event already exists. Do not turn a completed online
+      // save into a user-visible failure because a second local event failed.
+    }
   }
 
-  /// Update an existing memory in Firestore
-  static Future<void> updateMemory(Memory updated) async {
+  /// Updates an existing memory and keeps an append-only local audit trail.
+  static Future<void> updateMemory(
+    Memory updated, {
+    Iterable<OriginalVaultArchive> vaultArchives = const [],
+  }) async {
+    final archives = List<OriginalVaultArchive>.unmodifiable(vaultArchives);
+    await FamilyMemoryJournalService.appendMemoryEvent(
+      eventType: 'memory_update_intent',
+      memory: updated,
+      vaultArchives: archives,
+    );
     await _col.doc(updated.id).update(updated.toMap());
+    try {
+      await FamilyMemoryJournalService.appendMemoryEvent(
+        eventType: 'memory_updated',
+        memory: updated,
+        vaultArchives: archives,
+      );
+    } catch (_) {
+      // Preserve the valid Firestore update; the intent event remains local.
+    }
   }
 
   /// Update only the asynchronous YouTube processing state.
@@ -67,6 +109,15 @@ class MemoryService {
   /// failure deliberately leaves the memory document intact, so the user can
   /// retry rather than silently leaving an untracked photo or video behind.
   static Future<void> deleteMemory(Memory memory) async {
+    // Existing installations may contain old records from before Journal setup.
+    // Once a parent has selected the archive folder, never delete a Memory
+    // without first recording the request locally.
+    final journalConfigured =
+        await FamilyMemoryJournalService.isArchiveFolderSelected();
+    if (journalConfigured) {
+      await FamilyMemoryJournalService.appendDeletionRequested(memory);
+    }
+
     for (final photo in memory.allPhotos) {
       await cleanupImageAssets(
         imagePublicId: photo.imagePublicId,
@@ -82,6 +133,15 @@ class MemoryService {
     }
 
     await _col.doc(memory.id).delete();
+
+    if (journalConfigured) {
+      try {
+        await FamilyMemoryJournalService.appendDeleted(memory);
+      } catch (_) {
+        // The deletion request event remains. Never re-create deleted cloud
+        // media merely because a confirmation event could not be appended.
+      }
+    }
   }
 
   /// Removes newly-uploaded photo copies when the Firestore write that should

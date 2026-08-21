@@ -16,9 +16,14 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileNotFoundException
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Android-only bridge for preserving parents' selected source photos and videos.
@@ -70,6 +75,7 @@ class MainActivity : FlutterActivity() {
                     "isArchiveFolderSelected" -> result.success(journalTreeUri() != null)
                     "ensureArchiveFolderSelected" -> ensureJournalFolderSelected(result)
                     "appendJournalEvent" -> appendJournalEvent(call, result)
+                    "exportPortableArchive" -> exportPortableArchive(result)
                     else -> result.notImplemented()
                 }
             }
@@ -270,6 +276,203 @@ class MainActivity : FlutterActivity() {
             }
         }
         return null
+    }
+
+    private fun exportPortableArchive(result: MethodChannel.Result) {
+        val treeUri = journalTreeUri()
+        if (treeUri == null) {
+            result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
+            return
+        }
+
+        vaultExecutor.execute {
+            try {
+                val exported = buildPortableArchive(treeUri)
+                mainHandler.post { result.success(exported) }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("journal_export_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun buildPortableArchive(treeUri: Uri): Map<String, Any> {
+        val root = treeDocumentUri(treeUri)
+        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        val eventsDirectory = ensureJournalDirectory(archiveDirectory, JOURNAL_EVENTS_DIRECTORY)
+        val exportsDirectory = ensureJournalDirectory(archiveDirectory, "Exports")
+        val events = readJournalEvents(eventsDirectory)
+        val generatedAt = utcTimestamp()
+        val timestamp = System.currentTimeMillis()
+
+        val manifestEntries = JSONArray()
+        events.forEach { event ->
+            manifestEntries.put(JSONObject().apply {
+                put("fileName", event.fileName)
+                put("sha256", event.sha256)
+                put("bytes", event.byteCount)
+                put("validJson", event.json != null)
+            })
+        }
+
+        val index = JSONObject().apply {
+            put("schemaVersion", 1)
+            put("generatedAtUtc", generatedAt)
+            put("eventCount", events.size)
+            put("events", manifestEntries)
+        }
+        val manifest = JSONObject().apply {
+            put("algorithm", "SHA-256")
+            put("generatedAtUtc", generatedAt)
+            put("journalEventFiles", manifestEntries)
+        }
+        val readme = buildArchiveReadme(generatedAt, events.size)
+        val csv = buildJournalCsv(events)
+
+        val writtenFiles = listOf(
+            writeNewJournalDocument(exportsDirectory, "README_$timestamp.md", "text/markdown", readme),
+            writeNewJournalDocument(exportsDirectory, "Family_Memory_Archive_$timestamp.csv", "text/csv", csv),
+            writeNewJournalDocument(exportsDirectory, "archive-index_$timestamp.json", "application/json", index.toString(2)),
+            writeNewJournalDocument(exportsDirectory, "integrity-manifest_$timestamp.json", "application/json", manifest.toString(2)),
+        )
+
+        return mapOf(
+            "eventCount" to events.size,
+            "generatedAtUtc" to generatedAt,
+            "files" to writtenFiles.map { uri -> uri.toString() },
+        )
+    }
+
+    private data class JournalEventFile(
+        val fileName: String,
+        val byteCount: Int,
+        val sha256: String,
+        val json: JSONObject?,
+    )
+
+    private fun readJournalEvents(eventsDirectory: Uri): List<JournalEventFile> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            eventsDirectory,
+            DocumentsContract.getDocumentId(eventsDirectory),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        val events = mutableListOf<JournalEventFile>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            while (cursor.moveToNext()) {
+                val fileName = cursor.getString(nameColumn)
+                val mimeType = cursor.getString(mimeColumn)
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR || !fileName.endsWith(".json")) continue
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    eventsDirectory,
+                    cursor.getString(idColumn),
+                )
+                val bytes = contentResolver.openInputStream(documentUri)?.use { input -> input.readBytes() }
+                    ?: throw IllegalStateException("Android could not read a Family Memory Journal event file.")
+                val json = runCatching { JSONObject(bytes.toString(Charsets.UTF_8)) }.getOrNull()
+                events += JournalEventFile(fileName, bytes.size, sha256(bytes), json)
+            }
+        }
+        return events.sortedBy { event -> event.fileName }
+    }
+
+    private fun buildArchiveReadme(generatedAt: String, eventCount: Int): String = """
+# Entwined Memories — Family Archive Export
+
+Generated (UTC): $generatedAt
+Journal event files included: $eventCount
+
+## What this folder contains
+
+- `Journal Events/` is the append-only local history created by Entwined Memories.
+- `Exports/Family_Memory_Archive_*.csv` is a human-readable event summary.
+- `Exports/archive-index_*.json` lists event files and metadata for future software imports.
+- `Exports/integrity-manifest_*.json` stores SHA-256 hashes for the Journal Events files.
+
+## Recovery rule
+
+Keep this whole `Entwined Memories Archive` folder. Do not delete `Journal Events` even when a Memory was deleted inside the app; deletion events are part of the family history. The original photos and videos remain separately in `Pictures/Entwined Memories Originals`.
+
+## How to verify later
+
+Open a recent CSV in any spreadsheet application, open a recent JSON file in a text editor, and compare a Journal Events file hash with `integrity-manifest_*.json` using a future verification tool.
+""".trimIndent() + "\n"
+
+    private fun buildJournalCsv(events: List<JournalEventFile>): String {
+        val rows = mutableListOf(
+            listOf(
+                "Event file", "Event type", "Occurred UTC", "Memory ID", "Memory date", "Created by",
+                "Mood", "Note", "Photo count", "YouTube video ID", "Video processing", "Vault SHA-256",
+                "Event SHA-256", "Status",
+            ).joinToString(",") { csvValue(it) },
+        )
+        events.forEach { event ->
+            val json = event.json
+            val memory = json?.optJSONObject("memory")
+            val archives = json?.optJSONArray("vaultArchives") ?: JSONArray()
+            val vaultHashes = buildList {
+                for (index in 0 until archives.length()) {
+                    archives.optJSONObject(index)?.optString("sha256")?.takeIf { it.isNotBlank() }?.let(::add)
+                }
+            }.joinToString(";")
+            val values = listOf(
+                event.fileName,
+                json?.optString("eventType") ?: "",
+                json?.optString("occurredAtUtc") ?: "",
+                memory?.optString("id") ?: "",
+                memory?.optString("dateLocal") ?: "",
+                memory?.optString("createdBy") ?: "",
+                memory?.optString("mood") ?: "",
+                memory?.optString("note") ?: "",
+                memory?.optJSONArray("photos")?.length()?.toString() ?: "0",
+                memory?.optJSONObject("video")?.optString("youtubeVideoId") ?: "",
+                memory?.optJSONObject("video")?.optString("processingStatus") ?: "",
+                vaultHashes,
+                event.sha256,
+                if (json == null) "CORRUPT_JSON" else "OK",
+            )
+            rows += values.joinToString(",") { csvValue(it) }
+        }
+        return rows.joinToString("\n", postfix = "\n")
+    }
+
+    private fun csvValue(value: String): String = "\"${value.replace("\"", "\"\"").replace("\n", " ").replace("\r", " ")}\""
+
+    private fun writeNewJournalDocument(
+        parentUri: Uri,
+        fileName: String,
+        mimeType: String,
+        contents: String,
+    ): Uri {
+        val documentUri = DocumentsContract.createDocument(contentResolver, parentUri, mimeType, fileName)
+            ?: throw IllegalStateException("Android could not create a Family Archive export file.")
+        try {
+            contentResolver.openOutputStream(documentUri, "w")?.bufferedWriter(Charsets.UTF_8).use { writer ->
+                if (writer == null) throw IllegalStateException("Android could not write a Family Archive export file.")
+                writer.write(contents)
+                writer.flush()
+            }
+            return documentUri
+        } catch (error: Exception) {
+            contentResolver.delete(documentUri, null, null)
+            throw error
+        }
+    }
+
+    private fun utcTimestamp(): String {
+        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date())
+    }
+
+    private fun sha256(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     private fun archiveOriginal(

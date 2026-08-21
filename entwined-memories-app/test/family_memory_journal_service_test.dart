@@ -32,6 +32,29 @@ void main() {
     await FamilyMemoryJournalService.ensureArchiveFolderSelected();
   });
 
+  test('parses a complete portable archive export response', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          expect(call.method, 'exportPortableArchive');
+          return <String, Object>{
+            'eventCount': 4,
+            'generatedAtUtc': '2026-08-21T00:00:00.000Z',
+            'files': <String>[
+              'content://example/readme',
+              'content://example/csv',
+              'content://example/index',
+              'content://example/manifest',
+            ],
+          };
+        });
+
+    final export = await FamilyMemoryJournalService.exportPortableArchive();
+
+    expect(export.eventCount, 4);
+    expect(export.files, hasLength(4));
+    expect(export.generatedAtUtc, DateTime.utc(2026, 8, 21));
+  });
+
   test(
     'writes portable JSON event with memory and vault hash metadata',
     () async {

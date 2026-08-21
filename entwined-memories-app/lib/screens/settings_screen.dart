@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/app_settings.dart';
 import '../services/memory_service.dart';
+import '../services/family_memory_journal_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -15,6 +16,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _nameController = TextEditingController();
   bool _loading = true;
   bool _saving = false;
+  bool _exportingArchive = false;
   String _version = '';
   String _playbackPreference = 'auto';
   ThemeMode _themeMode = ThemeMode.light;
@@ -128,6 +130,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
           SnackBar(content: Text('Language သိမ်းမရသေးဘူး: $error')),
         );
       }
+    }
+  }
+
+  Future<void> _exportFamilyArchive() async {
+    if (_exportingArchive) return;
+    setState(() => _exportingArchive = true);
+    try {
+      await FamilyMemoryJournalService.ensureArchiveFolderSelected();
+      final archive = await FamilyMemoryJournalService.exportPortableArchive();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Family Archive export ပြီးပြီ — Journal event ${archive.eventCount} ခုပါဝင်တယ်',
+        ),
+        backgroundColor: const Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Family Archive export မလုပ်နိုင်သေးဘူး: $error'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      if (mounted) setState(() => _exportingArchive = false);
     }
   }
 
@@ -299,6 +327,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.inventory_2_outlined,
+                      color: Color(0xFFE8A0B4),
+                    ),
+                    title: const Text('Family Archive Export'),
+                    subtitle: const Text(
+                      'Journal CSV, JSON index, README နဲ့ integrity manifest ကိုထုတ်မယ်',
+                    ),
+                    trailing: _exportingArchive
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFE8A0B4),
+                            ),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    onTap: _exportingArchive ? null : _exportFamilyArchive,
                   ),
                 ),
                 const SizedBox(height: 24),

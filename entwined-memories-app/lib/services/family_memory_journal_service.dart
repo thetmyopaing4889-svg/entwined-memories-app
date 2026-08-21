@@ -9,6 +9,32 @@ import 'original_vault_service.dart';
 /// A durable, append-only local event written outside Firebase so a family can
 /// reconstruct the meaning of a Memory even if the online database is later
 /// unavailable. Event files are intentionally plain JSON for future portability.
+class FamilyMemoryJournalExport {
+  final int eventCount;
+  final DateTime generatedAtUtc;
+  final List<String> files;
+
+  const FamilyMemoryJournalExport({
+    required this.eventCount,
+    required this.generatedAtUtc,
+    required this.files,
+  });
+
+  factory FamilyMemoryJournalExport.fromMap(Map<Object?, Object?> data) {
+    final rawFiles = data['files'];
+    return FamilyMemoryJournalExport(
+      eventCount: (data['eventCount'] as num?)?.toInt() ?? 0,
+      generatedAtUtc:
+          DateTime.tryParse(data['generatedAtUtc'] as String? ?? '')?.toUtc() ??
+          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      files:
+          rawFiles is List
+              ? rawFiles.whereType<String>().toList(growable: false)
+              : const <String>[],
+    );
+  }
+}
+
 class FamilyMemoryJournalService {
   FamilyMemoryJournalService._();
 
@@ -81,6 +107,27 @@ class FamilyMemoryJournalService {
       throw StateError(
         error.message ?? 'Family Memory Journal ကိုမသိမ်းနိုင်ဘူး။',
       );
+    }
+  }
+
+  /// Creates a portable, human-readable export without modifying or removing
+  /// any append-only event file. Parents can copy this export alongside the
+  /// Journal Events folder during a future restore drill.
+  static Future<FamilyMemoryJournalExport> exportPortableArchive() async {
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'exportPortableArchive',
+      );
+      if (result == null) {
+        throw StateError('Family Archive export response မရဘူး။');
+      }
+      final export = FamilyMemoryJournalExport.fromMap(result);
+      if (export.files.length < 4) {
+        throw StateError('Family Archive export files မပြည့်စုံပါ။');
+      }
+      return export;
+    } on PlatformException catch (error) {
+      throw StateError(error.message ?? 'Family Archive export မလုပ်နိုင်ဘူး။');
     }
   }
 

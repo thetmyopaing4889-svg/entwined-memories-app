@@ -306,7 +306,7 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
 
         if (_isEditing) replacedPhotos.addAll(widget.memory!.allPhotos);
         setState(() {
-          _uploadStatus = 'Video YouTube ကို တင်နေတယ်...';
+          _uploadStatus = 'YouTube upload session ကိုစတင်နေတယ်...';
           _uploadProgress = 0;
         });
         final dateStr =
@@ -317,12 +317,25 @@ class _AddMemoryScreenState extends State<AddMemoryScreen> {
           description: note,
           mimeType: _mediaMimeType,
           isCancelled: () => _uploadCancelled,
+          onStage: (stage) {
+            if (!mounted) return;
+            setState(() {
+              _uploadStatus = switch (stage) {
+                YouTubeUploadStage.uploading => 'Video YouTube ကို တင်နေတယ်...',
+                YouTubeUploadStage.finalizing =>
+                  'YouTube က upload ကိုအတည်ပြုနေတယ်...',
+                YouTubeUploadStage.recovering =>
+                  'Network ပြတ်သွားလို့ YouTube upload ကို ပြန်ဆက်နေတယ်...',
+              };
+            });
+          },
           onProgress: (p) {
             if (!mounted) return;
             setState(() {
               _uploadProgress = p;
-              _uploadStatus =
-                  'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
+              _uploadStatus = p >= 1
+                  ? 'Video YouTube သို့တင်ပြီးပြီ။ Memory သိမ်းနေတယ်...'
+                  : 'Video YouTube ကို တင်နေတယ်... ${(p * 100).toStringAsFixed(0)}%';
             });
           },
         );

@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../services/app_settings.dart';
 import '../services/memory_service.dart';
 import '../services/family_memory_journal_service.dart';
+import '../services/encrypted_snapshot_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -17,6 +18,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _exportingArchive = false;
+  bool _creatingEncryptedBackup = false;
+  String _encryptedBackupStatus = '';
   String _version = '';
   String _playbackPreference = 'auto';
   ThemeMode _themeMode = ThemeMode.light;
@@ -156,6 +159,133 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ));
     } finally {
       if (mounted) setState(() => _exportingArchive = false);
+    }
+  }
+
+  Future<void> _showEncryptedBackupDialog() async {
+    final passphraseController = TextEditingController();
+    final confirmController = TextEditingController();
+    String? validationMessage;
+
+    final passphrase = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Encrypted Backup ဖန်တီးမယ်'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Photo, video နဲ့ Family Journal အသစ်များကို ဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: passphraseController,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Archive passphrase (အနည်းဆုံး ၁၆ လုံး)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmController,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Passphrase ကိုထပ်ရိုက်ပါ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (validationMessage != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    validationMessage!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('မလုပ်တော့ဘူး'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final passphrase = passphraseController.text;
+                if (passphrase.length < 16) {
+                  setDialogState(() => validationMessage =
+                      'Passphrase ကို အနည်းဆုံး ၁၆ လုံးထည့်ပါ။');
+                  return;
+                }
+                if (passphrase != confirmController.text) {
+                  setDialogState(() => validationMessage =
+                      'Passphrase နှစ်ခုမတူပါ။');
+                  return;
+                }
+                Navigator.pop(dialogContext, passphrase);
+              },
+              child: const Text('Encrypt လုပ်မယ်'),
+            ),
+          ],
+        ),
+      ),
+    );
+    passphraseController.dispose();
+    confirmController.dispose();
+    if (passphrase == null || !mounted) return;
+    await _createEncryptedBackup(passphrase);
+  }
+
+  Future<void> _createEncryptedBackup(String passphrase) async {
+    if (_creatingEncryptedBackup) return;
+    setState(() {
+      _creatingEncryptedBackup = true;
+      _encryptedBackupStatus = 'Encrypted backup ကိုပြင်ဆင်နေတယ်...';
+    });
+    try {
+      await FamilyMemoryJournalService.ensureArchiveFolderSelected();
+      final snapshot = await EncryptedSnapshotService.createIncrementalSnapshot(
+        passphrase: passphrase,
+        onProgress: (progress) {
+          if (!mounted) return;
+          setState(() {
+            _encryptedBackupStatus = progress.totalFiles == 0
+                ? 'Encrypted backup ကိုပြင်ဆင်နေတယ်...'
+                : 'Encrypt လုပ်နေတယ်... ${progress.completedFiles}/${progress.totalFiles}';
+          });
+        },
+      );
+      if (!mounted) return;
+      final message = snapshot.created
+          ? 'Encrypted backup ပြီးပြီ — file ${snapshot.fileCount} ခု၊ part ${snapshot.partUris.length} ခုထွက်တယ်'
+          : 'နောက်ဆုံး backup နောက်ပိုင်း အသစ်/ပြောင်းလဲသော file မရှိသေးဘူး';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message),
+        backgroundColor: const Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Encrypted backup မလုပ်နိုင်သေးဘူး: $error'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _creatingEncryptedBackup = false;
+          _encryptedBackupStatus = '';
+        });
+      }
     }
   }
 
@@ -351,6 +481,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           )
                         : const Icon(Icons.chevron_right),
                     onTap: _exportingArchive ? null : _exportFamilyArchive,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.lock_outline,
+                      color: Color(0xFFE8A0B4),
+                    ),
+                    title: const Text('Encrypted Backup ဖန်တီးမယ်'),
+                    subtitle: Text(
+                      _creatingEncryptedBackup
+                          ? _encryptedBackupStatus
+                          : 'အသစ်/ပြောင်းလဲသော Vault နဲ့ Journal files ကိုသာ encrypt လုပ်မယ်',
+                    ),
+                    trailing: _creatingEncryptedBackup
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFE8A0B4),
+                            ),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    onTap: _creatingEncryptedBackup
+                        ? null
+                        : _showEncryptedBackupDialog,
                   ),
                 ),
                 const SizedBox(height: 24),

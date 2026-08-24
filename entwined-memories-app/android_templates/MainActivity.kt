@@ -13,15 +13,29 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.DataOutputStream
 import java.io.File
 import java.io.FileNotFoundException
+import java.io.InputStream
 import java.security.MessageDigest
+import java.security.SecureRandom
+import java.security.spec.KeySpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import javax.crypto.Cipher
+import javax.crypto.CipherOutputStream
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,6 +55,14 @@ class MainActivity : FlutterActivity() {
         private const val JOURNAL_ROOT_DIRECTORY = "Entwined Memories Archive"
         private const val JOURNAL_EVENTS_DIRECTORY = "Journal Events"
         private const val JOURNAL_FOLDER_REQUEST_CODE = 9421
+        private const val SNAPSHOT_CHANNEL = "entwined_memories/encrypted_snapshot"
+        private const val SNAPSHOT_PREFERENCES = "encrypted_snapshot"
+        private const val SNAPSHOT_CURSOR_KEY = "last_completed_snapshot_utc_millis"
+        private const val ENCRYPTED_BACKUPS_DIRECTORY = "Encrypted Backups"
+        private const val ENCRYPTED_BACKUP_MAGIC = "EMBACKUP1"
+        private const val ENCRYPTED_BACKUP_VERSION = 1
+        private const val PBKDF2_ITERATIONS = 210_000
+        private const val ENCRYPTED_PACK_TARGET_BYTES = 1_250_000_000L
     }
 
     private enum class VaultMediaKind(
@@ -55,6 +77,7 @@ class MainActivity : FlutterActivity() {
     private val vaultExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingJournalFolderResult: MethodChannel.Result? = null
+    private var snapshotChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -79,6 +102,13 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        snapshotChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SNAPSHOT_CHANNEL)
+        snapshotChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "createIncrementalSnapshot" -> createIncrementalSnapshot(call, result)
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -153,6 +183,7 @@ class MainActivity : FlutterActivity() {
             null,
         )
         pendingJournalFolderResult = null
+        snapshotChannel = null
         vaultExecutor.shutdownNow()
         super.onDestroy()
     }
@@ -473,6 +504,372 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
     private fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
         return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    private fun snapshotPreferences() = getSharedPreferences(SNAPSHOT_PREFERENCES, MODE_PRIVATE)
+
+    private data class SnapshotInput(
+        val archivePath: String,
+        val bytes: Long,
+        val modifiedUtcMillis: Long,
+        val openInput: () -> InputStream,
+    )
+
+    private data class SnapshotDigest(
+        val archivePath: String,
+        val bytes: Long,
+        val sha256: String,
+    )
+
+    private fun createIncrementalSnapshot(call: MethodCall, result: MethodChannel.Result) {
+        val passphrase = call.argument<String>("passphrase")
+        if (passphrase == null || passphrase.length < 16) {
+            result.error(
+                "weak_passphrase",
+                "Use an archive passphrase with at least 16 characters.",
+                null,
+            )
+            return
+        }
+        val treeUri = journalTreeUri()
+        if (treeUri == null) {
+            result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
+            return
+        }
+
+        vaultExecutor.execute {
+            try {
+                val snapshot = buildIncrementalSnapshot(treeUri, passphrase)
+                mainHandler.post { result.success(snapshot) }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("snapshot_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun buildIncrementalSnapshot(treeUri: Uri, passphrase: String): Map<String, Any> {
+        val cursorMillis = snapshotPreferences().getLong(SNAPSHOT_CURSOR_KEY, 0L)
+        val inputs = collectSnapshotInputs(treeUri, cursorMillis)
+        if (inputs.isEmpty()) {
+            return mapOf(
+                "created" to false,
+                "fileCount" to 0,
+                "parts" to emptyList<String>(),
+                "createdAtUtc" to utcTimestamp(),
+            )
+        }
+
+        val generatedAt = utcTimestamp()
+        val snapshotId = "snapshot_${System.currentTimeMillis()}"
+        val root = treeDocumentUri(treeUri)
+        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        val backupsDirectory = ensureJournalDirectory(archiveDirectory, ENCRYPTED_BACKUPS_DIRECTORY)
+        val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val derived = deriveSnapshotKey(passphrase, salt)
+        val splitOutput = SplitDocumentOutputStream(backupsDirectory, snapshotId)
+
+        try {
+            DataOutputStream(splitOutput).use { header ->
+                header.writeUTF(ENCRYPTED_BACKUP_MAGIC)
+                header.writeInt(ENCRYPTED_BACKUP_VERSION)
+                header.writeUTF(derived.algorithm)
+                header.writeInt(PBKDF2_ITERATIONS)
+                header.writeInt(salt.size)
+                header.write(salt)
+                header.writeInt(iv.size)
+                header.write(iv)
+                header.flush()
+
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                    init(Cipher.ENCRYPT_MODE, SecretKeySpec(derived.key, "AES"), GCMParameterSpec(128, iv))
+                }
+                val digests = mutableListOf<SnapshotDigest>()
+                CipherOutputStream(header, cipher).use { encrypted ->
+                    ZipOutputStream(BufferedOutputStream(encrypted)).use { zip ->
+                        inputs.forEachIndexed { index, input ->
+                            writeSnapshotInput(zip, input, digests)
+                            notifySnapshotProgress(index + 1, inputs.size, input.archivePath)
+                        }
+                        val manifest = JSONObject().apply {
+                            put("schemaVersion", 1)
+                            put("snapshotId", snapshotId)
+                            put("createdAtUtc", generatedAt)
+                            put("incrementalAfterUtcMillis", cursorMillis)
+                            put("encryption", JSONObject().apply {
+                                put("container", ENCRYPTED_BACKUP_MAGIC)
+                                put("cipher", "AES-256-GCM")
+                                put("kdf", derived.algorithm)
+                                put("iterations", PBKDF2_ITERATIONS)
+                            })
+                            put("files", JSONArray().apply {
+                                digests.forEach { digest ->
+                                    put(JSONObject().apply {
+                                        put("path", digest.archivePath)
+                                        put("bytes", digest.bytes)
+                                        put("sha256", digest.sha256)
+                                    })
+                                }
+                            })
+                        }
+                        zip.putNextEntry(ZipEntry("snapshot-manifest.json"))
+                        zip.write(manifest.toString(2).toByteArray(Charsets.UTF_8))
+                        zip.closeEntry()
+                    }
+                }
+            }
+
+            // MediaStore DATE_ADDED is second-granular. Keep a two-second overlap
+            // so a newly created original can never be missed between snapshots.
+            val completedMillis = System.currentTimeMillis()
+            val nextCursorMillis = (completedMillis - 2_000L).coerceAtLeast(0L)
+            snapshotPreferences().edit().putLong(SNAPSHOT_CURSOR_KEY, nextCursorMillis).apply()
+            return mapOf(
+                "created" to true,
+                "snapshotId" to snapshotId,
+                "fileCount" to inputs.size,
+                "parts" to splitOutput.partUris.map(Uri::toString),
+                "createdAtUtc" to generatedAt,
+                "incrementalAfterUtcMillis" to cursorMillis,
+            )
+        } catch (error: Exception) {
+            splitOutput.deleteParts()
+            throw error
+        } finally {
+            splitOutput.closeQuietly()
+            derived.key.fill(0)
+        }
+    }
+
+    private data class DerivedSnapshotKey(val algorithm: String, val key: ByteArray)
+
+    private fun deriveSnapshotKey(passphrase: String, salt: ByteArray): DerivedSnapshotKey {
+        val keySpec: KeySpec = PBEKeySpec(passphrase.toCharArray(), salt, PBKDF2_ITERATIONS, 256)
+        val algorithm = runCatching {
+            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+            "PBKDF2WithHmacSHA256"
+        }.getOrElse { "PBKDF2WithHmacSHA1" }
+        val factory = SecretKeyFactory.getInstance(algorithm)
+        return try {
+            DerivedSnapshotKey(algorithm, factory.generateSecret(keySpec).encoded)
+        } finally {
+            (keySpec as PBEKeySpec).clearPassword()
+        }
+    }
+
+    private fun collectSnapshotInputs(treeUri: Uri, afterUtcMillis: Long): List<SnapshotInput> {
+        val inputs = mutableListOf<SnapshotInput>()
+        inputs += collectVaultMediaInputs(VaultMediaKind.PHOTO, afterUtcMillis)
+        inputs += collectVaultMediaInputs(VaultMediaKind.VIDEO, afterUtcMillis)
+
+        val root = treeDocumentUri(treeUri)
+        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        collectJournalDocumentInputs(
+            archiveDirectory,
+            "family-memory-journal",
+            afterUtcMillis,
+            inputs,
+        )
+        return inputs.sortedBy { input -> input.archivePath }
+    }
+
+    private fun collectVaultMediaInputs(
+        mediaKind: VaultMediaKind,
+        afterUtcMillis: Long,
+    ): List<SnapshotInput> {
+        val collection = mediaCollection(mediaKind)
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.DATE_ADDED,
+        )
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("$VAULT_ROOT/%")
+        val inputs = mutableListOf<SnapshotInput>()
+        contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+            val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+            while (cursor.moveToNext()) {
+                val addedMillis = cursor.getLong(dateAddedColumn) * 1000L
+                if (addedMillis <= afterUtcMillis) continue
+                val uri = Uri.withAppendedPath(collection, cursor.getLong(idColumn).toString())
+                val relativePath = cursor.getString(pathColumn).trimEnd('/')
+                val displayName = cursor.getString(nameColumn)
+                val kindPath = if (mediaKind == VaultMediaKind.PHOTO) "photos" else "videos"
+                inputs += SnapshotInput(
+                    archivePath = "original-media/$kindPath/$relativePath/$displayName",
+                    bytes = cursor.getLong(sizeColumn),
+                    modifiedUtcMillis = addedMillis,
+                    openInput = {
+                        contentResolver.openInputStream(uri)
+                            ?: throw FileNotFoundException("An Original Vault media file could not be opened.")
+                    },
+                )
+            }
+        }
+        return inputs
+    }
+
+    private fun collectJournalDocumentInputs(
+        parentUri: Uri,
+        relativePath: String,
+        afterUtcMillis: Long,
+        destination: MutableList<SnapshotInput>,
+    ) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            val modifiedColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            while (cursor.moveToNext()) {
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(parentUri, cursor.getString(idColumn))
+                val name = cursor.getString(nameColumn)
+                val mime = cursor.getString(mimeColumn)
+                val childPath = "$relativePath/$name"
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    // Encrypted Backups are snapshot outputs, never snapshot inputs.
+                    // Including them would create an ever-growing recursive archive.
+                    if (name != ENCRYPTED_BACKUPS_DIRECTORY) {
+                        collectJournalDocumentInputs(documentUri, childPath, afterUtcMillis, destination)
+                    }
+                    continue
+                }
+                val modifiedMillis = cursor.getLong(modifiedColumn).coerceAtLeast(0L)
+                if (modifiedMillis <= afterUtcMillis) continue
+                destination += SnapshotInput(
+                    archivePath = childPath,
+                    bytes = cursor.getLong(sizeColumn).coerceAtLeast(0L),
+                    modifiedUtcMillis = modifiedMillis,
+                    openInput = {
+                        contentResolver.openInputStream(documentUri)
+                            ?: throw FileNotFoundException("A Family Memory Journal file could not be opened.")
+                    },
+                )
+            )
+        }
+    }
+
+    private fun writeSnapshotInput(
+        zip: ZipOutputStream,
+        input: SnapshotInput,
+        digests: MutableList<SnapshotDigest>,
+    ) {
+        zip.putNextEntry(ZipEntry(input.archivePath))
+        val digest = MessageDigest.getInstance("SHA-256")
+        var copied = 0L
+        input.openInput().buffered().use { source ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = source.read(buffer)
+                if (read < 0) break
+                zip.write(buffer, 0, read)
+                digest.update(buffer, 0, read)
+                copied += read
+            }
+        }
+        zip.closeEntry()
+        digests += SnapshotDigest(
+            archivePath = input.archivePath,
+            bytes = copied,
+            sha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
+        )
+    }
+
+    private fun notifySnapshotProgress(completed: Int, total: Int, currentPath: String) {
+        mainHandler.post {
+            snapshotChannel?.invokeMethod(
+                "snapshotProgress",
+                mapOf("completedFiles" to completed, "totalFiles" to total, "currentPath" to currentPath),
+            )
+        }
+    }
+
+    private inner class SplitDocumentOutputStream(
+        private val parentUri: Uri,
+        private val snapshotId: String,
+    ) : java.io.OutputStream() {
+        val partUris = mutableListOf<Uri>()
+        private var activeStream: java.io.OutputStream? = null
+        private var activeBytes = 0L
+        private var closed = false
+
+        override fun write(oneByte: Int) {
+            write(byteArrayOf(oneByte.toByte()), 0, 1)
+        }
+
+        override fun write(bytes: ByteArray, offset: Int, length: Int) {
+            var writeOffset = offset
+            var remaining = length
+            while (remaining > 0) {
+                ensureActivePart()
+                val available = ENCRYPTED_PACK_TARGET_BYTES - activeBytes
+                val count = minOf(remaining.toLong(), available).toInt()
+                activeStream!!.write(bytes, writeOffset, count)
+                activeBytes += count
+                writeOffset += count
+                remaining -= count
+                if (activeBytes >= ENCRYPTED_PACK_TARGET_BYTES) rotatePart()
+            }
+        }
+
+        override fun flush() {
+            activeStream?.flush()
+        }
+
+        override fun close() {
+            if (closed) return
+            closed = true
+            activeStream?.close()
+            activeStream = null
+        }
+
+        fun closeQuietly() = runCatching { close() }
+
+        fun deleteParts() {
+            partUris.forEach { uri -> runCatching { contentResolver.delete(uri, null, null) } }
+        }
+
+        private fun ensureActivePart() {
+            if (activeStream == null) startPart()
+        }
+
+        private fun rotatePart() {
+            activeStream?.close()
+            activeStream = null
+            activeBytes = 0L
+        }
+
+        private fun startPart() {
+            val partNumber = partUris.size + 1
+            val displayName = String.format(Locale.US, "%s_part%03d.emb", snapshotId, partNumber)
+            val documentUri = DocumentsContract.createDocument(
+                contentResolver,
+                parentUri,
+                "application/octet-stream",
+                displayName,
+            ) ?: throw IllegalStateException("Android could not create an encrypted backup part.")
+            val output = contentResolver.openOutputStream(documentUri, "w")
+                ?: throw IllegalStateException("Android could not write an encrypted backup part.")
+            partUris += documentUri
+            activeStream = BufferedOutputStream(output)
+        }
     }
 
     private fun archiveOriginal(

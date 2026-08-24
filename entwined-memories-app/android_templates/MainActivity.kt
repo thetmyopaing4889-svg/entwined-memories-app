@@ -762,7 +762,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                             ?: throw FileNotFoundException("A Family Memory Journal file could not be opened.")
                     },
                 )
-            )
+            }
         }
     }
 

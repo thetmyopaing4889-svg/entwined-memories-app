@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/backup_health.dart';
 import '../models/memory.dart';
 import 'family_memory_journal_service.dart';
 import 'original_vault_service.dart';
@@ -12,10 +13,12 @@ import 'original_vault_service.dart';
 class FamilySettingsData {
   final String creatorName;
   final String playbackPreference;
+  final BackupHealthStatus backupHealth;
 
   const FamilySettingsData({
     required this.creatorName,
     required this.playbackPreference,
+    this.backupHealth = const BackupHealthStatus(),
   });
 }
 
@@ -229,6 +232,9 @@ class MemoryService {
           creatorName: (data['creatorName'] as String? ?? '').trim(),
           playbackPreference:
               _normalizePlayback(data['playbackPreference'] as String?),
+          backupHealth: BackupHealthStatus.fromFirestoreMap(
+            data['backupHealth'],
+          ),
         );
       }
 
@@ -259,6 +265,102 @@ class MemoryService {
       update['playbackPreference'] = _normalizePlayback(playbackPreference);
     }
     await _settingsDoc.set(update, SetOptions(merge: true));
+  }
+
+  /// Records a completed encrypted snapshot without touching any existing
+  /// family settings. The six-month due date is shared with both parents; the
+  /// notification itself stays local to each Android phone.
+  static Future<void> recordEncryptedSnapshot({
+    required String snapshotId,
+    required DateTime createdAtUtc,
+    required int fileCount,
+    required int partCount,
+    required String createdBy,
+  }) {
+    final createdAt = createdAtUtc.toUtc();
+    return _mergeBackupHealth(<String, dynamic>{
+      'schemaVersion': BackupHealthStatus.schemaVersion,
+      'latestSnapshotId': snapshotId,
+      'latestSnapshotCreatedAtUtc': createdAt.toIso8601String(),
+      'latestSnapshotFileCount': fileCount,
+      'latestSnapshotPartCount': partCount,
+      'latestSnapshotCreatedBy': _backupActor(createdBy),
+      'nextHealthCheckDueAtUtc':
+          BackupHealthStatus.sixMonthsAfter(createdAt).toIso8601String(),
+    });
+  }
+
+  static Future<void> recordBackupVerification({
+    required DateTime verifiedAtUtc,
+    required String verifiedBy,
+  }) {
+    return _mergeBackupHealth(<String, dynamic>{
+      'schemaVersion': BackupHealthStatus.schemaVersion,
+      'latestVerifiedAtUtc': verifiedAtUtc.toUtc().toIso8601String(),
+      'latestVerifiedBy': _backupActor(verifiedBy),
+    });
+  }
+
+  static Future<void> recordRestoreDrill({
+    required DateTime restoredAtUtc,
+    required String restoredBy,
+  }) {
+    return _mergeBackupHealth(<String, dynamic>{
+      'schemaVersion': BackupHealthStatus.schemaVersion,
+      'lastRestoreDrillAtUtc': restoredAtUtc.toUtc().toIso8601String(),
+      'lastRestoreDrillBy': _backupActor(restoredBy),
+    });
+  }
+
+  static Future<void> recordTeraBoxCheck({
+    required DateTime checkedAtUtc,
+    required String checkedBy,
+  }) {
+    return _mergeBackupHealth(<String, dynamic>{
+      'schemaVersion': BackupHealthStatus.schemaVersion,
+      'teraBoxCheckedAtUtc': checkedAtUtc.toUtc().toIso8601String(),
+      'teraBoxCheckedBy': _backupActor(checkedBy),
+    });
+  }
+
+  static Future<void> recordTelegramCheck({
+    required DateTime checkedAtUtc,
+    required String checkedBy,
+  }) {
+    return _mergeBackupHealth(<String, dynamic>{
+      'schemaVersion': BackupHealthStatus.schemaVersion,
+      'telegramCheckedAtUtc': checkedAtUtc.toUtc().toIso8601String(),
+      'telegramCheckedBy': _backupActor(checkedBy),
+    });
+  }
+
+  /// Performs a transaction because Dad and Mom may complete different health
+  /// checklist rows near the same time. The existing nested map is read and
+  /// merged, so a completion never erases the other parent's fields.
+  static Future<void> _mergeBackupHealth(Map<String, dynamic> update) async {
+    await FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(_settingsDoc);
+      final data = snapshot.data();
+      final rawHealth = data?['backupHealth'];
+      final current = rawHealth is Map
+          ? Map<String, dynamic>.from(rawHealth)
+          : <String, dynamic>{};
+      current.addAll(update);
+      transaction.set(
+        _settingsDoc,
+        <String, dynamic>{
+          'backupHealth': current,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
+  static String _backupActor(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return 'Dad/Mom';
+    return trimmed.length <= 60 ? trimmed : trimmed.substring(0, 60);
   }
 
   static String _normalizePlayback(String? value) =>

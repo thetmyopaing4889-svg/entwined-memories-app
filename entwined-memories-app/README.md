@@ -337,3 +337,61 @@ Must include:
 👉 Timeline smooth
 
 = 🎉 SUCCESS
+
+---
+
+## 22. Long-Term Family Archive and Encrypted Backup
+
+This private installation uses a single shared family account. Firebase, Cloudinary, Cloudflare R2, and YouTube are useful display or metadata services, but they are **not** the source of truth for the family archive. The original selected photos and videos are copied first into the Android Original Vault; deleting a Memory from the app does not delete those originals.
+
+| Archive layer | Location | Purpose |
+| --- | --- | --- |
+| Original Vault | `Pictures/Entwined Memories Originals/` | Full-resolution photos and videos selected through the app. |
+| Family Journal | `Documents/Entwined Memories Archive/Journal Events/` | Append-only local event history. |
+| Portable export | `Documents/Entwined Memories Archive/Exports/` | CSV, JSON index, README, and integrity manifest. |
+| Encrypted pack output | `Documents/Entwined Memories Archive/Encrypted Backups/` | Client-side encrypted `.emb` parts for manual secondary copies. |
+
+### 22.1 Creating an encrypted incremental snapshot
+
+From **Settings**, choose **Encrypted Backup ဖန်တီးမယ်** whenever the family wants to make a backup. The app asks for an archive passphrase of at least 16 characters and confirms it before beginning. The passphrase is used only for that operation: it is not saved in the app, Android settings, Firebase, TeraBox, Telegram, or the Journal.
+
+The Android device packages only new or changed Original Vault and Journal files since that device's prior completed snapshot. It encrypts the ZIP stream with **AES-256-GCM** and derives its encryption key through **PBKDF2** with a random salt. Every original archive file has a SHA-256 entry in the encrypted snapshot manifest. Very large snapshots are split into `.emb` parts named like `snapshot_..._part001.emb`, `snapshot_..._part002.emb`, and so on.
+
+> **Recovery rule:** Every `.emb` part with the same `snapshot_...` ID is required. Keep their exact file names, keep them together, and never upload, download, or restore only one part from a multi-part snapshot.
+
+Different phones may create their own incremental snapshots. This is expected: each phone keeps its own local incremental cursor. Keep every successful snapshot set rather than assuming one device's newest snapshot contains the other phone's newest local files.
+
+### 22.2 Verify and restore before trusting an off-site copy
+
+Use **Verify Latest Encrypted Backup** in Settings to decrypt and inspect the latest local snapshot. The app validates the AES-GCM authentication tag and verifies every file's SHA-256 value against the encrypted manifest. A wrong passphrase, missing part, altered part, or corrupt manifest must be treated as a failed verification.
+
+Use **Restore encrypted .emb files** for a recovery drill or when restoring downloaded parts. First select the folder containing all `.emb` parts from one snapshot, then select a separate empty or new destination folder. The app creates a new `Entwined Memories Restore snapshot_...` folder and does not overwrite an existing restore folder or file. If authentication or manifest validation fails, the newly-created restore snapshot folder is removed. The restore feature writes recovered files into a safe restore destination; it does not automatically re-import them into the app timeline or overwrite the Original Vault.
+
+### 22.3 Manual TeraBox and Dad-only Telegram copies
+
+The app never asks for, saves, displays, or transmits TeraBox or Telegram credentials. Parents manually sign in to those services and upload **only** the encrypted `.emb` documents.
+
+| Destination | Manual rule |
+| --- | --- |
+| TeraBox | Upload every part of the selected snapshot as files. Do not rename parts. Do not upload raw photos, raw videos, Journal folders, the passphrase, or any recovery note. |
+| Dad-only Telegram private channel | Dad's account is the only member. Attach every `.emb` part as a **File/Document**, not as gallery media. Never send raw originals, the passphrase, recovery notes, or service login information. |
+
+Keep the passphrase and recovery instructions on paper in a safe place known to both parents. A cloud copy without the passphrase cannot restore the archive; a passphrase shared in a cloud chat weakens the protection of every off-site copy.
+
+### 22.4 Six-month health check
+
+The **Family Backup Health** card in Settings is shared through `app_data/settings.backupHealth`, so Dad and Mom can see the latest snapshot, local verification, restore drill, TeraBox check, and Telegram check. It does not contain secrets. Completing a new encrypted snapshot sets the next check six calendar months later.
+
+Each phone can enable its own Android local reminder using **ဒီဖုန်းအတွက် ၆ လ Reminder ဖွင့်/Update လုပ်မယ်**. Notification permission is requested only from that explicit action. Android manufacturers may delay background alarms, so the in-app due card remains the required fallback; opening Settings shows the due state even if a phone notification was delayed.
+
+### 22.5 Syncthing storage choice
+
+The Journal Documents tree may be shared through Syncthing for Journal and export redundancy. Encrypted packs can be large and are intended for manual TeraBox and Dad-only Telegram copies, so the recommended default is to add this ignore rule to the **Journal** Syncthing folder on both phones:
+
+```text
+Encrypted Backups/**
+```
+
+This preserves the Journal and Exports sync without automatically consuming storage and transfer data for large encrypted parts. A family may deliberately omit this ignore rule if it wants every encrypted pack duplicated across both phones and has sufficient storage; that is a storage decision, not a replacement for the off-site copy and restore drill.
+
+---

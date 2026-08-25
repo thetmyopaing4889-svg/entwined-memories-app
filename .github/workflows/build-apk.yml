@@ -69,7 +69,7 @@ jobs:
 
           TARGET_KOTLIN  = '1.9.22'
           TARGET_GRADLE  = 'https://services.gradle.org/distributions/gradle-8.9-all.zip'
-          TARGET_AGP     = '8.3.0'
+          TARGET_AGP     = '8.6.0'
           TARGET_GMS     = '4.4.2'
 
           def read(path):
@@ -173,6 +173,55 @@ jobs:
                   r'(com\.google\.gms:google-services:)[\d.]+',
                   rf'\g<1>{TARGET_GMS}', app_gradle)
               print(f"  [{app_gradle_path}] GMS classpath: {'PATCHED' if n else 'no match'}")
+
+              # flutter_local_notifications 19.5.0 needs Java 17 and
+              # core-library desugaring even for a single inexact reminder.
+              if app_gradle_path.endswith('.kts'):
+                  app_gradle = re.sub(
+                      r'(sourceCompatibility\s*=\s*)JavaVersion\.VERSION_[0-9]+',
+                      r'\g<1>JavaVersion.VERSION_17', app_gradle)
+                  app_gradle = re.sub(
+                      r'(targetCompatibility\s*=\s*)JavaVersion\.VERSION_[0-9]+',
+                      r'\g<1>JavaVersion.VERSION_17', app_gradle)
+                  app_gradle = re.sub(
+                      r'(jvmTarget\s*=\s*)JavaVersion\.VERSION_[0-9]+\.toString\(\)',
+                      r'\g<1>JavaVersion.VERSION_17.toString()', app_gradle)
+                  if 'isCoreLibraryDesugaringEnabled' not in app_gradle:
+                      app_gradle, desugar_n = re.subn(
+                          r'(\n\s*compileOptions\s*\{\n)',
+                          r'\g<1>        isCoreLibraryDesugaringEnabled = true\n',
+                          app_gradle, count=1)
+                      if not desugar_n:
+                          raise RuntimeError('Could not enable Kotlin DSL core-library desugaring')
+                  if 'com.android.tools:desugar_jdk_libs:2.1.4' not in app_gradle:
+                      app_gradle, dependency_n = re.subn(
+                          r'(\n\s*dependencies\s*\{\n)',
+                          r'\g<1>    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n',
+                          app_gradle, count=1)
+                      if not dependency_n:
+                          app_gradle += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+              else:
+                  app_gradle = re.sub(
+                      r'(sourceCompatibility\s+)JavaVersion\.VERSION_[0-9]+',
+                      r'\g<1>JavaVersion.VERSION_17', app_gradle)
+                  app_gradle = re.sub(
+                      r'(targetCompatibility\s+)JavaVersion\.VERSION_[0-9]+',
+                      r'\g<1>JavaVersion.VERSION_17', app_gradle)
+                  if 'coreLibraryDesugaringEnabled true' not in app_gradle:
+                      app_gradle, desugar_n = re.subn(
+                          r'(\n\s*compileOptions\s*\{\n)',
+                          r'\g<1>        coreLibraryDesugaringEnabled true\n',
+                          app_gradle, count=1)
+                      if not desugar_n:
+                          raise RuntimeError('Could not enable Groovy core-library desugaring')
+                  if "com.android.tools:desugar_jdk_libs:2.1.4" not in app_gradle:
+                      app_gradle, dependency_n = re.subn(
+                          r'(\n\s*dependencies\s*\{\n)',
+                          r"\g<1>    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n",
+                          app_gradle, count=1)
+                      if not dependency_n:
+                          app_gradle += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+              print(f'  [{app_gradle_path}] notification desugaring: OK')
               write(app_gradle_path, app_gradle)
 
           # ── gradle-wrapper.properties ─────────────────────────────────────
@@ -191,6 +240,8 @@ jobs:
                   'android.permission.READ_EXTERNAL_STORAGE',
                   'android.permission.READ_MEDIA_IMAGES',
                   'android.permission.READ_MEDIA_VIDEO',
+                  'android.permission.POST_NOTIFICATIONS',
+                  'android.permission.RECEIVE_BOOT_COMPLETED',
               ]
               for perm in perms:
                   tag = f'<uses-permission android:name="{perm}"/>'
@@ -220,6 +271,32 @@ jobs:
                   print('  [AndroidManifest] Added UCropActivity')
               else:
                   print('  [AndroidManifest] UCropActivity already present')
+
+              # flutter_local_notifications needs explicit receivers to
+              # display scheduled reminders and reschedule the one family
+              # health reminder after a phone reboot.
+              notification_receivers = (
+                  '        <receiver android:exported="false" '
+                  'android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />\n'
+                  '        <receiver android:exported="false" '
+                  'android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">\n'
+                  '            <intent-filter>\n'
+                  '                <action android:name="android.intent.action.BOOT_COMPLETED" />\n'
+                  '                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />\n'
+                  '                <action android:name="android.intent.action.QUICKBOOT_POWERON" />\n'
+                  '                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />\n'
+                  '            </intent-filter>\n'
+                  '        </receiver>'
+              )
+              if 'ScheduledNotificationReceiver' not in manifest:
+                  manifest = manifest.replace(
+                      '</application>',
+                      f'{notification_receivers}\n    </application>',
+                      1,
+                  )
+                  print('  [AndroidManifest] Added scheduled notification receivers')
+              else:
+                  print('  [AndroidManifest] notification receivers already present')
 
               # Android 15 forces edge-to-edge for apps targeting API 35.
               # uCrop does not yet handle those window insets consistently,

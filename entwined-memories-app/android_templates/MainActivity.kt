@@ -15,6 +15,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileNotFoundException
@@ -31,6 +32,7 @@ import java.util.concurrent.Executors
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
 import javax.crypto.CipherOutputStream
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -55,9 +57,12 @@ class MainActivity : FlutterActivity() {
         private const val JOURNAL_ROOT_DIRECTORY = "Entwined Memories Archive"
         private const val JOURNAL_EVENTS_DIRECTORY = "Journal Events"
         private const val JOURNAL_FOLDER_REQUEST_CODE = 9421
+        private const val SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE = 9422
+        private const val SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE = 9423
         private const val SNAPSHOT_CHANNEL = "entwined_memories/encrypted_snapshot"
         private const val SNAPSHOT_PREFERENCES = "encrypted_snapshot"
         private const val SNAPSHOT_CURSOR_KEY = "last_completed_snapshot_utc_millis"
+        private const val SNAPSHOT_LAST_ID_KEY = "last_completed_snapshot_id"
         private const val ENCRYPTED_BACKUPS_DIRECTORY = "Encrypted Backups"
         private const val ENCRYPTED_BACKUP_MAGIC = "EMBACKUP1"
         private const val ENCRYPTED_BACKUP_VERSION = 1
@@ -77,6 +82,12 @@ class MainActivity : FlutterActivity() {
     private val vaultExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingJournalFolderResult: MethodChannel.Result? = null
+    private data class PendingSnapshotRestore(
+        val passphrase: String,
+        val result: MethodChannel.Result,
+        var sourceTreeUri: Uri? = null,
+    )
+    private var pendingSnapshotRestore: PendingSnapshotRestore? = null
     private var snapshotChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -106,6 +117,8 @@ class MainActivity : FlutterActivity() {
         snapshotChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "createIncrementalSnapshot" -> createIncrementalSnapshot(call, result)
+                "verifyLatestSnapshot" -> verifyLatestSnapshot(call, result)
+                "restoreSnapshotFromSelectedFolder" -> restoreSnapshotFromSelectedFolder(call, result)
                 else -> result.notImplemented()
             }
         }
@@ -113,8 +126,14 @@ class MainActivity : FlutterActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != JOURNAL_FOLDER_REQUEST_CODE) return
+        when (requestCode) {
+            JOURNAL_FOLDER_REQUEST_CODE -> handleJournalFolderResult(resultCode, data)
+            SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE -> handleSnapshotSourceFolderResult(resultCode, data)
+            SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE -> handleSnapshotRestoreFolderResult(resultCode, data)
+        }
+    }
 
+    private fun handleJournalFolderResult(resultCode: Int, data: Intent?) {
         val pendingResult = pendingJournalFolderResult ?: return
         pendingJournalFolderResult = null
         val treeUri = data?.data
@@ -124,15 +143,77 @@ class MainActivity : FlutterActivity() {
         }
 
         try {
-            val grantedFlags = data.flags and (
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            contentResolver.takePersistableUriPermission(treeUri, grantedFlags)
+            takeTreePermission(treeUri, data.flags)
             journalPreferences().edit().putString(JOURNAL_TREE_URI_KEY, treeUri.toString()).apply()
             pendingResult.success(mapOf("configured" to true, "treeUri" to treeUri.toString()))
         } catch (error: Exception) {
             pendingResult.error("journal_folder_failed", error.message, null)
         }
+    }
+
+    private fun handleSnapshotSourceFolderResult(resultCode: Int, data: Intent?) {
+        val pending = pendingSnapshotRestore ?: return
+        val treeUri = data?.data
+        if (resultCode != RESULT_OK || treeUri == null) {
+            pendingSnapshotRestore = null
+            pending.result.error("snapshot_restore_cancelled", "No encrypted backup source folder was selected.", null)
+            return
+        }
+        try {
+            takeTreePermission(treeUri, data.flags)
+            pending.sourceTreeUri = treeUri
+            openDocumentTree(SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE)
+        } catch (error: Exception) {
+            pendingSnapshotRestore = null
+            pending.result.error("snapshot_restore_failed", error.message, null)
+        }
+    }
+
+    private fun handleSnapshotRestoreFolderResult(resultCode: Int, data: Intent?) {
+        val pending = pendingSnapshotRestore ?: return
+        pendingSnapshotRestore = null
+        val destinationTreeUri = data?.data
+        val sourceTreeUri = pending.sourceTreeUri
+        if (resultCode != RESULT_OK || destinationTreeUri == null || sourceTreeUri == null) {
+            pending.result.error("snapshot_restore_cancelled", "No restore destination folder was selected.", null)
+            return
+        }
+        try {
+            takeTreePermission(destinationTreeUri, data.flags)
+            vaultExecutor.execute {
+                try {
+                    val restored = restoreSnapshotFromTree(
+                        sourceTreeUri,
+                        destinationTreeUri,
+                        pending.passphrase,
+                    )
+                    mainHandler.post { pending.result.success(restored) }
+                } catch (error: Exception) {
+                    mainHandler.post {
+                        pending.result.error("snapshot_restore_failed", error.message, null)
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            pending.result.error("snapshot_restore_failed", error.message, null)
+        }
+    }
+
+    private fun takeTreePermission(treeUri: Uri, flags: Int) {
+        val grantedFlags = flags and (
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        )
+        contentResolver.takePersistableUriPermission(treeUri, grantedFlags)
+    }
+
+    private fun openDocumentTree(requestCode: Int) {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+        startActivityForResult(intent, requestCode)
     }
 
     private fun archive(
@@ -183,6 +264,12 @@ class MainActivity : FlutterActivity() {
             null,
         )
         pendingJournalFolderResult = null
+        pendingSnapshotRestore?.result?.error(
+            "snapshot_restore_interrupted",
+            "Encrypted backup restore was interrupted.",
+            null,
+        )
+        pendingSnapshotRestore = null
         snapshotChannel = null
         vaultExecutor.shutdownNow()
         super.onDestroy()
@@ -307,6 +394,26 @@ class MainActivity : FlutterActivity() {
             }
         }
         return null
+    }
+
+    private fun deleteDocumentTree(documentUri: Uri) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            documentUri,
+            DocumentsContract.getDocumentId(documentUri),
+        )
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+        val children = mutableListOf<Uri>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            while (cursor.moveToNext()) {
+                children += DocumentsContract.buildDocumentUriUsingTree(
+                    documentUri,
+                    cursor.getString(idColumn),
+                )
+            }
+        }
+        children.forEach { child -> deleteDocumentTree(child) }
+        contentResolver.delete(documentUri, null, null)
     }
 
     private fun exportPortableArchive(result: MethodChannel.Result) {
@@ -623,7 +730,10 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             // so a newly created original can never be missed between snapshots.
             val completedMillis = System.currentTimeMillis()
             val nextCursorMillis = (completedMillis - 2_000L).coerceAtLeast(0L)
-            snapshotPreferences().edit().putLong(SNAPSHOT_CURSOR_KEY, nextCursorMillis).apply()
+            snapshotPreferences().edit()
+                .putLong(SNAPSHOT_CURSOR_KEY, nextCursorMillis)
+                .putString(SNAPSHOT_LAST_ID_KEY, snapshotId)
+                .apply()
             return mapOf(
                 "created" to true,
                 "snapshotId" to snapshotId,
@@ -869,6 +979,440 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 ?: throw IllegalStateException("Android could not write an encrypted backup part.")
             partUris += documentUri
             activeStream = BufferedOutputStream(output)
+        }
+    }
+
+    private fun restoreSnapshotFromSelectedFolder(call: MethodCall, result: MethodChannel.Result) {
+        val passphrase = call.argument<String>("passphrase")
+        if (passphrase == null || passphrase.length < 16) {
+            result.error("weak_passphrase", "Use an archive passphrase with at least 16 characters.", null)
+            return
+        }
+        if (pendingSnapshotRestore != null) {
+            result.error("snapshot_restore_busy", "An encrypted backup restore is already in progress.", null)
+            return
+        }
+        pendingSnapshotRestore = PendingSnapshotRestore(passphrase, result)
+        try {
+            openDocumentTree(SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE)
+        } catch (error: Exception) {
+            pendingSnapshotRestore = null
+            result.error("snapshot_restore_failed", error.message, null)
+        }
+    }
+
+    private fun verifyLatestSnapshot(call: MethodCall, result: MethodChannel.Result) {
+        val passphrase = call.argument<String>("passphrase")
+        if (passphrase == null || passphrase.length < 16) {
+            result.error("weak_passphrase", "Use an archive passphrase with at least 16 characters.", null)
+            return
+        }
+        val treeUri = journalTreeUri()
+        val snapshotId = snapshotPreferences().getString(SNAPSHOT_LAST_ID_KEY, null)
+        if (treeUri == null || snapshotId.isNullOrBlank()) {
+            result.error("snapshot_not_found", "No encrypted backup is available for verification.", null)
+            return
+        }
+        vaultExecutor.execute {
+            try {
+                val verification = verifySnapshot(treeUri, snapshotId, passphrase)
+                mainHandler.post { result.success(verification) }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("snapshot_verification_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun verifySnapshot(treeUri: Uri, snapshotId: String, passphrase: String): Map<String, Any> {
+        val root = treeDocumentUri(treeUri)
+        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        val backupsDirectory = ensureJournalDirectory(archiveDirectory, ENCRYPTED_BACKUPS_DIRECTORY)
+        val partUris = snapshotPartUris(backupsDirectory, snapshotId)
+        if (partUris.isEmpty()) {
+            throw FileNotFoundException("The latest encrypted backup parts are no longer available.")
+        }
+
+        MultiDocumentInputStream(partUris).use { combined ->
+            DataInputStream(BufferedInputStream(combined)).use { header ->
+                val magic = header.readUTF()
+                if (magic != ENCRYPTED_BACKUP_MAGIC) {
+                    throw IllegalStateException("This backup does not use the Entwined Memories encrypted archive format.")
+                }
+                val version = header.readInt()
+                if (version != ENCRYPTED_BACKUP_VERSION) {
+                    throw IllegalStateException("This encrypted archive format is not supported by this app version.")
+                }
+                val algorithm = header.readUTF()
+                val iterations = header.readInt()
+                if (iterations < 10_000 || iterations > 5_000_000) {
+                    throw IllegalStateException("This encrypted archive has an invalid key-derivation setting.")
+                }
+                val saltLength = header.readInt()
+                if (saltLength !in 8..64) throw IllegalStateException("This encrypted archive has an invalid salt.")
+                val salt = ByteArray(saltLength)
+                header.readFully(salt)
+                val ivLength = header.readInt()
+                if (ivLength !in 12..32) throw IllegalStateException("This encrypted archive has an invalid initialization vector.")
+                val iv = ByteArray(ivLength)
+                header.readFully(iv)
+
+                val derived = deriveSnapshotKey(passphrase, salt, algorithm, iterations)
+                try {
+                    val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                        init(Cipher.DECRYPT_MODE, SecretKeySpec(derived.key, "AES"), GCMParameterSpec(128, iv))
+                    }
+                    val actual = mutableMapOf<String, SnapshotDigest>()
+                    var manifest: JSONObject? = null
+                    CipherInputStream(header, cipher).use { decrypted ->
+                        java.util.zip.ZipInputStream(BufferedInputStream(decrypted)).use { zip ->
+                            while (true) {
+                                val entry = zip.nextEntry ?: break
+                                if (entry.isDirectory) continue
+                                if (entry.name == "snapshot-manifest.json") {
+                                    val bytes = zip.readBytes()
+                                    manifest = JSONObject(bytes.toString(Charsets.UTF_8))
+                                } else {
+                                    actual[entry.name] = readSnapshotZipEntry(zip, entry.name)
+                                }
+                                zip.closeEntry()
+                            }
+                        }
+                    }
+                    val parsedManifest = manifest
+                        ?: throw IllegalStateException("Encrypted archive manifest is missing.")
+                    val files = parsedManifest.optJSONArray("files")
+                        ?: throw IllegalStateException("Encrypted archive manifest file list is missing.")
+                    if (files.length() != actual.size) {
+                        throw IllegalStateException("Encrypted archive file count does not match its manifest.")
+                    }
+                    for (index in 0 until files.length()) {
+                        val expected = files.optJSONObject(index)
+                            ?: throw IllegalStateException("Encrypted archive manifest is invalid.")
+                        val path = expected.optString("path")
+                        val actualDigest = actual[path]
+                            ?: throw IllegalStateException("Encrypted archive is missing $path.")
+                        if (actualDigest.bytes != expected.optLong("bytes") ||
+                            actualDigest.sha256 != expected.optString("sha256")) {
+                            throw IllegalStateException("Encrypted archive integrity check failed for $path.")
+                        }
+                    }
+                    return mapOf(
+                        "verified" to true,
+                        "snapshotId" to snapshotId,
+                        "fileCount" to actual.size,
+                        "partCount" to partUris.size,
+                        "verifiedAtUtc" to utcTimestamp(),
+                    )
+                } finally {
+                    derived.key.fill(0)
+                }
+            }
+        }
+    }
+
+    private fun restoreSnapshotFromTree(
+        sourceTreeUri: Uri,
+        destinationTreeUri: Uri,
+        passphrase: String,
+    ): Map<String, Any> {
+        val sourceRoot = treeDocumentUri(sourceTreeUri)
+        val snapshotGroups = snapshotPartGroups(sourceRoot)
+        if (snapshotGroups.isEmpty()) {
+            throw FileNotFoundException("No Entwined Memories .emb backup parts were found in the selected source folder.")
+        }
+        val snapshotId = snapshotGroups.keys.maxOrNull()
+            ?: throw FileNotFoundException("No encrypted backup snapshot was found.")
+        val partUris = snapshotGroups[snapshotId]
+            ?: throw FileNotFoundException("Encrypted backup parts are missing.")
+
+        val destinationRoot = treeDocumentUri(destinationTreeUri)
+        val restoreDirectoryName = "Entwined Memories Restore $snapshotId"
+        if (findJournalChild(destinationRoot, restoreDirectoryName) != null) {
+            throw IllegalStateException(
+                "Restore stopped: $restoreDirectoryName already exists. Choose a new empty destination folder so no files are overwritten."
+            )
+        }
+        val restoreRoot = DocumentsContract.createDocument(
+            contentResolver,
+            destinationRoot,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            restoreDirectoryName,
+        ) ?: throw IllegalStateException("Android could not create the restore folder.")
+
+        try {
+            val actual = mutableMapOf<String, SnapshotDigest>()
+            var manifest: JSONObject? = null
+            MultiDocumentInputStream(partUris).use { combined ->
+                DataInputStream(BufferedInputStream(combined)).use { header ->
+                    val magic = header.readUTF()
+                    if (magic != ENCRYPTED_BACKUP_MAGIC) {
+                        throw IllegalStateException("This backup does not use the Entwined Memories encrypted archive format.")
+                    }
+                    val version = header.readInt()
+                    if (version != ENCRYPTED_BACKUP_VERSION) {
+                        throw IllegalStateException("This encrypted archive format is not supported by this app version.")
+                    }
+                    val algorithm = header.readUTF()
+                    val iterations = header.readInt()
+                    if (iterations < 10_000 || iterations > 5_000_000) {
+                        throw IllegalStateException("This encrypted archive has an invalid key-derivation setting.")
+                    }
+                    val saltLength = header.readInt()
+                    if (saltLength !in 8..64) throw IllegalStateException("This encrypted archive has an invalid salt.")
+                    val salt = ByteArray(saltLength)
+                    header.readFully(salt)
+                    val ivLength = header.readInt()
+                    if (ivLength !in 12..32) throw IllegalStateException("This encrypted archive has an invalid initialization vector.")
+                    val iv = ByteArray(ivLength)
+                    header.readFully(iv)
+
+                    val derived = deriveSnapshotKey(passphrase, salt, algorithm, iterations)
+                    try {
+                        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                            init(Cipher.DECRYPT_MODE, SecretKeySpec(derived.key, "AES"), GCMParameterSpec(128, iv))
+                        }
+                        CipherInputStream(header, cipher).use { decrypted ->
+                            java.util.zip.ZipInputStream(BufferedInputStream(decrypted)).use { zip ->
+                                while (true) {
+                                    val entry = zip.nextEntry ?: break
+                                    if (entry.isDirectory) {
+                                        zip.closeEntry()
+                                        continue
+                                    }
+                                    if (entry.name == "snapshot-manifest.json") {
+                                        if (manifest != null) {
+                                            throw IllegalStateException("Encrypted archive contains more than one manifest.")
+                                        }
+                                        manifest = JSONObject(zip.readBytes().toString(Charsets.UTF_8))
+                                    } else {
+                                        val archivePath = validatedSnapshotArchivePath(entry.name)
+                                        if (actual.containsKey(archivePath)) {
+                                            throw IllegalStateException("Encrypted archive contains the same file twice: $archivePath")
+                                        }
+                                        actual[archivePath] = writeRestoredSnapshotEntry(
+                                            zip,
+                                            restoreRoot,
+                                            archivePath,
+                                        )
+                                    }
+                                    zip.closeEntry()
+                                }
+                            }
+                        }
+                    } finally {
+                        derived.key.fill(0)
+                    }
+                }
+            }
+            validateSnapshotManifest(manifest, actual)
+            return mapOf(
+                "restored" to true,
+                "snapshotId" to snapshotId,
+                "fileCount" to actual.size,
+                "partCount" to partUris.size,
+                "restoreFolderUri" to restoreRoot.toString(),
+                "restoredAtUtc" to utcTimestamp(),
+            )
+        } catch (error: Exception) {
+            // An authentication or manifest failure must never leave a partial
+            // recovery pretending to be a valid archive.
+            runCatching { deleteDocumentTree(restoreRoot) }
+            throw error
+        }
+    }
+
+    private fun validateSnapshotManifest(
+        manifest: JSONObject?,
+        actual: Map<String, SnapshotDigest>,
+    ) {
+        val parsedManifest = manifest
+            ?: throw IllegalStateException("Encrypted archive manifest is missing.")
+        val files = parsedManifest.optJSONArray("files")
+            ?: throw IllegalStateException("Encrypted archive manifest file list is missing.")
+        if (files.length() != actual.size) {
+            throw IllegalStateException("Encrypted archive file count does not match its manifest.")
+        }
+        for (index in 0 until files.length()) {
+            val expected = files.optJSONObject(index)
+                ?: throw IllegalStateException("Encrypted archive manifest is invalid.")
+            val path = validatedSnapshotArchivePath(expected.optString("path"))
+            val actualDigest = actual[path]
+                ?: throw IllegalStateException("Encrypted archive is missing $path.")
+            if (actualDigest.bytes != expected.optLong("bytes") ||
+                actualDigest.sha256 != expected.optString("sha256")) {
+                throw IllegalStateException("Encrypted archive integrity check failed for $path.")
+            }
+        }
+    }
+
+    private fun validatedSnapshotArchivePath(value: String): String {
+        if (value.isBlank() || value.length > 1_000 || value.contains('\\')) {
+            throw IllegalStateException("Encrypted archive contains an invalid file path.")
+        }
+        val segments = value.split("/")
+        if (segments.any { it.isBlank() || it == "." || it == ".." || it.length > 180 }) {
+            throw IllegalStateException("Encrypted archive contains an unsafe file path.")
+        }
+        return value
+    }
+
+    private fun writeRestoredSnapshotEntry(
+        zip: java.util.zip.ZipInputStream,
+        restoreRoot: Uri,
+        archivePath: String,
+    ): SnapshotDigest {
+        val segments = archivePath.split("/")
+        var parent = restoreRoot
+        for (segment in segments.dropLast(1)) {
+            parent = ensureJournalDirectory(parent, segment)
+        }
+        val fileName = segments.last()
+        if (findJournalChild(parent, fileName) != null) {
+            throw IllegalStateException("Restore stopped because a destination file already exists: $archivePath")
+        }
+        val destination = DocumentsContract.createDocument(
+            contentResolver,
+            parent,
+            "application/octet-stream",
+            fileName,
+        ) ?: throw IllegalStateException("Android could not create restored file $archivePath.")
+        return try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            var bytes = 0L
+            contentResolver.openOutputStream(destination, "w")?.buffered().use { output ->
+                if (output == null) throw IllegalStateException("Android could not write restored file $archivePath.")
+                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                while (true) {
+                    val read = zip.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    bytes += read
+                }
+                output.flush()
+            }
+            SnapshotDigest(
+                archivePath = archivePath,
+                bytes = bytes,
+                sha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
+            )
+        } catch (error: Exception) {
+            runCatching { contentResolver.delete(destination, null, null) }
+            throw error
+        }
+    }
+
+    private fun snapshotPartGroups(parentUri: Uri): Map<String, List<Uri>> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+        val pattern = Regex("""(snapshot_[0-9]+)_part([0-9]{3})\.emb""")
+        val grouped = mutableMapOf<String, MutableList<Pair<Int, Uri>>>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            while (cursor.moveToNext()) {
+                if (cursor.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR) continue
+                val match = pattern.matchEntire(cursor.getString(nameColumn)) ?: continue
+                val snapshotId = match.groupValues[1]
+                val number = match.groupValues[2].toInt()
+                val uri = DocumentsContract.buildDocumentUriUsingTree(
+                    parentUri,
+                    cursor.getString(idColumn),
+                )
+                grouped.getOrPut(snapshotId) { mutableListOf() } += number to uri
+            }
+        }
+        return grouped.mapValues { (snapshotId, parts) ->
+            val sorted = parts.sortedBy { it.first }
+            val expected = (1..sorted.size).toList()
+            val actual = sorted.map { it.first }
+            if (actual != expected) {
+                throw IllegalStateException("Encrypted backup $snapshotId is missing or has duplicate part files.")
+            }
+            sorted.map { it.second }
+        }
+    }
+
+    private fun deriveSnapshotKey(
+        passphrase: String,
+        salt: ByteArray,
+        algorithm: String,
+        iterations: Int,
+    ): DerivedSnapshotKey {
+        if (algorithm !in setOf("PBKDF2WithHmacSHA256", "PBKDF2WithHmacSHA1")) {
+            throw IllegalStateException("This encrypted archive uses an unsupported key-derivation algorithm.")
+        }
+        val keySpec: KeySpec = PBEKeySpec(passphrase.toCharArray(), salt, iterations, 256)
+        val factory = SecretKeyFactory.getInstance(algorithm)
+        return try {
+            DerivedSnapshotKey(algorithm, factory.generateSecret(keySpec).encoded)
+        } finally {
+            (keySpec as PBEKeySpec).clearPassword()
+        }
+    }
+
+    private fun snapshotPartUris(backupsDirectory: Uri, snapshotId: String): List<Uri> {
+        return snapshotPartGroups(backupsDirectory)[snapshotId] ?: emptyList()
+    }
+
+    private fun readSnapshotZipEntry(
+        zip: java.util.zip.ZipInputStream,
+        archivePath: String,
+    ): SnapshotDigest {
+        val digest = MessageDigest.getInstance("SHA-256")
+        var bytes = 0L
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = zip.read(buffer)
+            if (read < 0) break
+            digest.update(buffer, 0, read)
+            bytes += read
+        }
+        return SnapshotDigest(
+            archivePath = archivePath,
+            bytes = bytes,
+            sha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
+        )
+    }
+
+    private inner class MultiDocumentInputStream(
+        private val partUris: List<Uri>,
+    ) : InputStream() {
+        private var partIndex = 0
+        private var active: InputStream? = null
+
+        override fun read(): Int {
+            val one = ByteArray(1)
+            return if (read(one, 0, 1) < 0) -1 else one[0].toInt() and 0xff
+        }
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (length == 0) return 0
+            while (partIndex < partUris.size) {
+                if (active == null) {
+                    active = contentResolver.openInputStream(partUris[partIndex])
+                        ?: throw FileNotFoundException("An encrypted backup part could not be opened.")
+                }
+                val read = active!!.read(buffer, offset, length)
+                if (read >= 0) return read
+                active!!.close()
+                active = null
+                partIndex += 1
+            }
+            return -1
+        }
+
+        override fun close() {
+            active?.close()
+            active = null
         }
     }
 

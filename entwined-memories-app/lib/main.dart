@@ -20,11 +20,15 @@ class EntwinedMemoriesApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: settings,
-      builder: (context, _) => AppSettingsScope(
-        settings: settings,
-        child: MaterialApp(
+    // Keep this inherited scope mounted while MaterialApp rebuilds for a
+    // theme/language change. Android's Documents picker temporarily returns
+    // control to Flutter; rebuilding the scope itself at that point can
+    // deactivate an InheritedElement while Settings still depends on it.
+    return AppSettingsScope(
+      settings: settings,
+      child: AnimatedBuilder(
+        animation: settings,
+        builder: (context, _) => MaterialApp(
           title: 'Entwined Memories',
           debugShowCheckedModeBanner: false,
           themeMode: settings.themeMode,

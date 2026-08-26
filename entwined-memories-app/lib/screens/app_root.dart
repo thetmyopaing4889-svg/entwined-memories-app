@@ -38,24 +38,18 @@ class _AppRootState extends State<AppRoot> {
       builder: (context, snapshot) {
         if (!_splashComplete) return const SplashScreen();
 
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        // Do not temporarily keep an outgoing authenticated tree alive while
+        // an Android system picker is returning. A single stable destination
+        // avoids deactivating inherited dependents during that platform
+        // lifecycle transition.
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            snapshot.data == null) {
           return const _AuthLoading();
         }
 
-        final destination = snapshot.data == null
+        return snapshot.data == null
             ? const LoginScreen(key: ValueKey('login-screen'))
             : const MainScreen(key: ValueKey('main-screen'));
-
-        return AnimatedSwitcher(
-          duration: const Duration(milliseconds: 360),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: child,
-          ),
-          child: destination,
-        );
       },
     );
   }

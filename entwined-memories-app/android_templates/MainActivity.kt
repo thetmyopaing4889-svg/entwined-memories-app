@@ -82,6 +82,14 @@ class MainActivity : FlutterActivity() {
     private val vaultExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingJournalFolderResult: MethodChannel.Result? = null
+    private data class PendingJournalFolderCompletion(
+        val result: MethodChannel.Result,
+        val payload: Map<String, Any?>? = null,
+        val errorCode: String? = null,
+        val errorMessage: String? = null,
+    )
+    private var pendingJournalFolderCompletion: PendingJournalFolderCompletion? = null
+    private var activityIsPostResumed = false
     private data class PendingSnapshotRestore(
         val passphrase: String,
         val result: MethodChannel.Result,
@@ -124,6 +132,39 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onPostResume() {
+        super.onPostResume()
+        activityIsPostResumed = true
+        deliverPendingJournalFolderCompletionWhenSafe()
+    }
+
+    override fun onPause() {
+        activityIsPostResumed = false
+        super.onPause()
+    }
+
+    private fun deliverPendingJournalFolderCompletionWhenSafe() {
+        if (!activityIsPostResumed || pendingJournalFolderCompletion == null) return
+        // The system document activity is fully closed only after this point.
+        // Posting once more ensures Dart cannot rebuild while Android is still
+        // in the onActivityResult transaction. If another pause begins first,
+        // the completion stays queued for the next onPostResume.
+        mainHandler.post {
+            if (!activityIsPostResumed) return@post
+            val completion = pendingJournalFolderCompletion ?: return@post
+            pendingJournalFolderCompletion = null
+            if (completion.payload != null) {
+                completion.result.success(completion.payload)
+            } else {
+                completion.result.error(
+                    completion.errorCode ?: "journal_folder_failed",
+                    completion.errorMessage,
+                    null,
+                )
+            }
+        }
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
@@ -133,22 +174,51 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /// Activity results arrive while Android is still unwinding the external
+    /// Documents UI. Completing a MethodChannel call synchronously from this
+    /// callback can let Dart rebuild/dispose dependent widgets inside that
+    /// transaction. Always enqueue the reply after onActivityResult returns.
+    private fun postChannelSuccess(result: MethodChannel.Result, value: Any?) {
+        mainHandler.post { result.success(value) }
+    }
+
+    private fun postChannelError(
+        result: MethodChannel.Result,
+        code: String,
+        message: String?,
+    ) {
+        mainHandler.post { result.error(code, message, null) }
+    }
+
     private fun handleJournalFolderResult(resultCode: Int, data: Intent?) {
         val pendingResult = pendingJournalFolderResult ?: return
         pendingJournalFolderResult = null
         val treeUri = data?.data
         if (resultCode != RESULT_OK || treeUri == null) {
-            pendingResult.error("journal_folder_cancelled", "No Family Memory Journal folder was selected.", null)
+            pendingJournalFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                errorCode = "journal_folder_cancelled",
+                errorMessage = "No Family Memory Journal folder was selected.",
+            )
+            deliverPendingJournalFolderCompletionWhenSafe()
             return
         }
 
         try {
             takeTreePermission(treeUri, data.flags)
             journalPreferences().edit().putString(JOURNAL_TREE_URI_KEY, treeUri.toString()).apply()
-            pendingResult.success(mapOf("configured" to true, "treeUri" to treeUri.toString()))
+            pendingJournalFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                payload = mapOf("configured" to true, "treeUri" to treeUri.toString()),
+            )
         } catch (error: Exception) {
-            pendingResult.error("journal_folder_failed", error.message, null)
+            pendingJournalFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                errorCode = "journal_folder_failed",
+                errorMessage = error.message,
+            )
         }
+        deliverPendingJournalFolderCompletionWhenSafe()
     }
 
     private fun handleSnapshotSourceFolderResult(resultCode: Int, data: Intent?) {
@@ -156,16 +226,24 @@ class MainActivity : FlutterActivity() {
         val treeUri = data?.data
         if (resultCode != RESULT_OK || treeUri == null) {
             pendingSnapshotRestore = null
-            pending.result.error("snapshot_restore_cancelled", "No encrypted backup source folder was selected.", null)
+            postChannelError(
+                pending.result,
+                "snapshot_restore_cancelled",
+                "No encrypted backup source folder was selected.",
+            )
             return
         }
         try {
             takeTreePermission(treeUri, data.flags)
             pending.sourceTreeUri = treeUri
-            openDocumentTree(SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE)
+            // Start the second external picker after the first result callback
+            // completes, for the same lifecycle reason as channel delivery.
+            mainHandler.post {
+                openDocumentTree(SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE)
+            }
         } catch (error: Exception) {
             pendingSnapshotRestore = null
-            pending.result.error("snapshot_restore_failed", error.message, null)
+            postChannelError(pending.result, "snapshot_restore_failed", error.message)
         }
     }
 
@@ -175,7 +253,11 @@ class MainActivity : FlutterActivity() {
         val destinationTreeUri = data?.data
         val sourceTreeUri = pending.sourceTreeUri
         if (resultCode != RESULT_OK || destinationTreeUri == null || sourceTreeUri == null) {
-            pending.result.error("snapshot_restore_cancelled", "No restore destination folder was selected.", null)
+            postChannelError(
+                pending.result,
+                "snapshot_restore_cancelled",
+                "No restore destination folder was selected.",
+            )
             return
         }
         try {
@@ -187,15 +269,17 @@ class MainActivity : FlutterActivity() {
                         destinationTreeUri,
                         pending.passphrase,
                     )
-                    mainHandler.post { pending.result.success(restored) }
+                    postChannelSuccess(pending.result, restored)
                 } catch (error: Exception) {
-                    mainHandler.post {
-                        pending.result.error("snapshot_restore_failed", error.message, null)
-                    }
+                    postChannelError(
+                        pending.result,
+                        "snapshot_restore_failed",
+                        error.message,
+                    )
                 }
             }
         } catch (error: Exception) {
-            pending.result.error("snapshot_restore_failed", error.message, null)
+            postChannelError(pending.result, "snapshot_restore_failed", error.message)
         }
     }
 
@@ -264,6 +348,12 @@ class MainActivity : FlutterActivity() {
             null,
         )
         pendingJournalFolderResult = null
+        pendingJournalFolderCompletion?.result?.error(
+            "journal_folder_interrupted",
+            "Family Memory Journal folder selection was interrupted.",
+            null,
+        )
+        pendingJournalFolderCompletion = null
         pendingSnapshotRestore?.result?.error(
             "snapshot_restore_interrupted",
             "Encrypted backup restore was interrupted.",

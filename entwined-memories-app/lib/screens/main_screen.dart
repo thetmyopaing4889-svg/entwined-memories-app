@@ -16,12 +16,21 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _index = 0;
 
-  static final _tabs = [
-    HomeScreen(),
-    ProfileScreen(),
-    PlaybackScreen(),
-    SettingsScreen(),
-  ];
+  late final List<Widget> _tabs;
+
+  @override
+  void initState() {
+    super.initState();
+    // Widgets must belong to one element tree only. Keeping these instances
+    // static can reuse a SettingsScreen while an authenticated root is being
+    // replaced after an Android external activity returns.
+    _tabs = [
+      HomeScreen(),
+      ProfileScreen(),
+      PlaybackScreen(),
+      SettingsScreen(),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {

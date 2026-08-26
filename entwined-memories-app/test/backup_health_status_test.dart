@@ -17,6 +17,11 @@ void main() {
         'latestSnapshotCreatedAtUtc': '2026-08-25T00:00:00.000Z',
         'latestSnapshotFileCount': 4,
         'latestSnapshotPartCount': 1,
+        'latestSnapshotPhotoCount': 2,
+        'latestSnapshotVideoCount': 1,
+        'latestSnapshotJournalEventCount': 4,
+        'latestSnapshotExportCount': 3,
+        'latestSnapshotScope': 'complete',
         'latestSnapshotCreatedBy': 'Dad',
         'nextHealthCheckDueAtUtc': '2027-02-25T00:00:00.000Z',
       });
@@ -25,6 +30,11 @@ void main() {
       expect(health.latestSnapshotId, 'snapshot_123');
       expect(health.latestSnapshotFileCount, 4);
       expect(health.latestSnapshotPartCount, 1);
+      expect(health.latestSnapshotPhotoCount, 2);
+      expect(health.latestSnapshotVideoCount, 1);
+      expect(health.latestSnapshotJournalEventCount, 4);
+      expect(health.latestSnapshotExportCount, 3);
+      expect(health.latestSnapshotScope, 'complete');
       expect(health.isDueAt(DateTime.utc(2027, 2, 24, 23, 59)), isFalse);
       expect(health.isDueAt(DateTime.utc(2027, 2, 25)), isTrue);
     });

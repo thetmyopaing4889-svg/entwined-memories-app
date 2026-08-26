@@ -254,7 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Photo, video နဲ့ Family Journal အသစ်များကို ဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
+                  'Dad/Mom ဖုန်းနှစ်လုံးတွင်Syncthing ကကူးထားသမျှပါအပါအဝင် Original photo/video အားလုံး၊ Journal Events နဲ့ Exports ကိုဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ပထမတစ်ခါမှာ Pictures/Entwined Memories Originals folder ကိုရွေးပေးရမယ်။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -328,7 +328,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     try {
       await FamilyMemoryJournalService.ensureArchiveFolderSelected();
-      final snapshot = await EncryptedSnapshotService.createIncrementalSnapshot(
+      if (!mounted) return;
+      setState(() => _encryptedBackupStatus =
+          'Original Vault folder ကိုစစ်နေတယ်... ပထမတစ်ခါဆို Pictures/Entwined Memories Originals ကိုရွေးပါ');
+      await EncryptedSnapshotService.ensureOriginalVaultFolderSelected();
+      if (!mounted) return;
+      setState(() => _encryptedBackupStatus =
+          'Dad/Mom Originals, Journal နဲ့ Exports အားလုံးကိုencrypt လုပ်ရန်ပြင်ဆင်နေတယ်...');
+      final snapshot = await EncryptedSnapshotService.createCompleteSnapshot(
         passphrase: passphrase,
         onProgress: (progress) {
           if (!mounted) return;
@@ -348,6 +355,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             createdAtUtc: snapshot.createdAtUtc,
             fileCount: snapshot.fileCount,
             partCount: snapshot.partUris.length,
+            photoCount: snapshot.coverage.photos,
+            videoCount: snapshot.coverage.videos,
+            journalEventCount: snapshot.coverage.journalEvents,
+            exportCount: snapshot.coverage.exports,
+            snapshotScope: snapshot.snapshotScope,
             createdBy: actor,
           );
           await _refreshBackupHealth();
@@ -369,8 +381,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
       if (!mounted) return;
       final message = snapshot.created
-          ? 'Encrypted backup ပြီးပြီ — file ${snapshot.fileCount} ခု၊ part ${snapshot.partUris.length} ခုထွက်တယ်${healthSyncWarning ?? ''}'
-          : 'နောက်ဆုံး backup နောက်ပိုင်း အသစ်/ပြောင်းလဲသော file မရှိသေးဘူး';
+          ? 'Complete encrypted backup ပြီးပြီ — ပုံ ${snapshot.coverage.photos} ခု၊ video ${snapshot.coverage.videos} ခု၊ Journal ${snapshot.coverage.journalEvents} ခု၊ Export ${snapshot.coverage.exports} ခု · part ${snapshot.partUris.length} ခုထွက်တယ်${healthSyncWarning ?? ''}'
+          : 'Backup ဖန်တီးမရသေးဘူး';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(message),
         backgroundColor: const Color(0xFFE8A0B4),
@@ -586,6 +598,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showOffsiteChecklist({required bool teraBox}) async {
+    if (!_hasCompleteMediaSnapshot) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+          'Photo/video အစစ်ပါတဲ့ Complete Encrypted Backup အသစ်ကိုအရင်လုပ်ပြီး Verify/Restore စစ်ပါ။ အဟောင်း Journal-only snapshot ကိုTeraBox/Telegram မတင်သေးပါ။',
+        ),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
     var acknowledged = false;
     final title = teraBox ? 'TeraBox encrypted upload checklist' : 'Dad-only Telegram checklist';
     final completed = await showDialog<bool>(
@@ -671,6 +693,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final time = _formatHealthTime(value);
     return actor == null || actor.isEmpty ? time : '$time · $actor';
   }
+
+  String _snapshotCoverageLine() {
+    if (!_backupHealth.hasSnapshot) return 'မဖန်တီးရသေးဘူး';
+    if (_backupHealth.latestSnapshotScope != 'complete') {
+      return 'အဟောင်း snapshot ဖြစ်တယ် — Dad/Mom Originals အားလုံးပါသော Complete Backup အသစ်လုပ်ပါ';
+    }
+    return 'ပုံ ${_backupHealth.latestSnapshotPhotoCount} ခု · video ${_backupHealth.latestSnapshotVideoCount} ခု · Journal ${_backupHealth.latestSnapshotJournalEventCount} ခု · Export ${_backupHealth.latestSnapshotExportCount} ခု';
+  }
+
+  bool get _hasCompleteMediaSnapshot =>
+      _backupHealth.latestSnapshotScope == 'complete' &&
+      (_backupHealth.latestSnapshotPhotoCount +
+              _backupHealth.latestSnapshotVideoCount) >
+          0;
 
   void _showAbout() {
     showAboutDialog(
@@ -853,7 +889,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     title: const Text('Family Archive Export'),
                     subtitle: const Text(
-                      'Journal CSV, JSON index, README နဲ့ integrity manifest ကိုထုတ်မယ်',
+                      'စာသားမှတ်တမ်းအတွက်သာပါ — caption, date, note နဲ့ Journal CSV/JSON ကိုထုတ်မယ်။ ပုံ/video ဖိုင် မပါဘူး။',
                     ),
                     trailing: _exportingArchive
                         ? const SizedBox(
@@ -879,7 +915,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: Text(
                       _creatingEncryptedBackup
                           ? _encryptedBackupStatus
-                          : 'အသစ်/ပြောင်းလဲသော Vault နဲ့ Journal files ကိုသာ encrypt လုပ်မယ်',
+                          : 'Dad/Mom Originals အားလုံး (Syncthing ကကူးထားတာပါ) + Journal/Exports ကိုpassword နဲ့သော့ခတ်တဲ့ Complete .emb backup လုပ်မယ်',
                     ),
                     trailing: _creatingEncryptedBackup
                         ? const SizedBox(
@@ -951,10 +987,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         Text(
                           !_backupHealth.hasSnapshot
-                              ? 'Encrypted snapshot တစ်ခုမရှိသေးဘူး။ အောက်က Encrypted Backup ကိုအရင်လုပ်ပါ။'
+                              ? 'အဆင့် ၁: Complete Encrypted Backup ကိုအရင်လုပ်ပါ။ အဲဒီနောက် Verify → Restore → TeraBox/Telegram အစဉ်လိုက်စစ်မယ်။'
                               : backupDue
                                   ? '၆ လ health check အချိန်ရောက်ပြီ — .emb parts, TeraBox, Telegram နဲ့ restore/verify ကိုစစ်ပါ။'
-                                  : 'နောက် health check: ${_formatHealthTime(nextDue)}',
+                                  : 'Backup စာရင်းကိုဒီမှာကြည့်ပြီး ၆ လနောက် ${_formatHealthTime(nextDue)} တွင်ပြန်စစ်ပါ။',
                           style: TextStyle(color: muted, height: 1.35),
                         ),
                         const Divider(height: 24),
@@ -963,17 +999,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           leading: const Icon(Icons.lock_outline),
                           title: const Text('Latest encrypted snapshot'),
                           subtitle: Text(_backupHealth.hasSnapshot
-                              ? '${_backupHealth.latestSnapshotFileCount} file · ${_backupHealth.latestSnapshotPartCount} part · ${_healthLine(_backupHealth.latestSnapshotCreatedAtUtc, _backupHealth.latestSnapshotCreatedBy)}'
-                              : 'မဖန်တီးရသေးဘူး'),
+                              ? '${_snapshotCoverageLine()}\nစုစုပေါင်း ${_backupHealth.latestSnapshotFileCount} file · ${_backupHealth.latestSnapshotPartCount} part · ${_healthLine(_backupHealth.latestSnapshotCreatedAtUtc, _backupHealth.latestSnapshotCreatedBy)}'
+                              : 'အဆင့် ၁ — Photo/video အစစ် + Journal/Exports ပါသော Complete .emb backup ကိုဖန်တီးပါ'),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.verified_user_outlined),
                           title: const Text('Latest local integrity verification'),
-                          subtitle: Text(_healthLine(
-                            _backupHealth.latestVerifiedAtUtc,
-                            _backupHealth.latestVerifiedBy,
-                          )),
+                          subtitle: Text(
+                            _backupHealth.latestVerifiedAtUtc == null
+                                ? 'အဆင့် ၂ — နောက်ဆုံး .emb box မပျက်ဘူးလား၊ passphrase နဲ့ဖွင့်လို့ရလားကိုစစ်ပါ'
+                                : '${_healthLine(_backupHealth.latestVerifiedAtUtc, _backupHealth.latestVerifiedBy)}\nPassphrase မှန်ပြီး .emb files မပျက်ကြောင်းစစ်ပြီးပါပြီ',
+                          ),
                           trailing: _verifyingEncryptedBackup
                               ? const SizedBox(
                                   width: 22,
@@ -994,8 +1031,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('Restore encrypted .emb files'),
                           subtitle: Text(
                             _backupHealth.lastRestoreDrillAtUtc == null
-                                ? 'Source .emb folder နှင့်အလွတ် restore folder ကိုရွေးပြီးစာရင်းစစ်၍ပြန်ထုတ်မယ်'
-                                : 'Last drill: ${_healthLine(_backupHealth.lastRestoreDrillAtUtc, _backupHealth.lastRestoreDrillBy)}',
+                                ? 'အဆင့် ၃ — .emb files အားလုံးကိုရွေးပြီး folder အသစ်ထဲသို့သာပြန်ထုတ်စမ်းမယ်။ Originals ကိုမoverwrite လုပ်ဘူး'
+                                : 'Last drill: ${_healthLine(_backupHealth.lastRestoreDrillAtUtc, _backupHealth.lastRestoreDrillBy)}\nဖုန်းပျက်လျှင်ပြန်ထုတ်နိုင်ကြောင်းစမ်းပြီးပါပြီ',
                           ),
                           trailing: _restoringEncryptedBackup
                               ? const SizedBox(
@@ -1016,10 +1053,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.cloud_upload_outlined),
                           title: const Text('TeraBox encrypted copy'),
-                          subtitle: Text(_healthLine(
-                            _backupHealth.teraBoxCheckedAtUtc,
-                            _backupHealth.teraBoxCheckedBy,
-                          )),
+                          subtitle: Text(
+                            _backupHealth.teraBoxCheckedAtUtc == null
+                                ? 'အဆင့် ၄ — Complete .emb files အားလုံးကိုTeraBox သို့File/Document အဖြစ်ကိုယ်တိုင်တင်ပါ။ Raw photo/video မတင်ပါနှင့်'
+                                : '${_healthLine(_backupHealth.teraBoxCheckedAtUtc, _backupHealth.teraBoxCheckedBy)}\nEncrypted .emb files အားလုံးTeraBox မှာရှိကြောင်းစစ်ပြီးပါပြီ',
+                          ),
                           trailing: const Icon(Icons.checklist_outlined),
                           onTap: () => _showOffsiteChecklist(teraBox: true),
                         ),
@@ -1027,10 +1065,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.send_outlined),
                           title: const Text('Dad-only Telegram encrypted copy'),
-                          subtitle: Text(_healthLine(
-                            _backupHealth.telegramCheckedAtUtc,
-                            _backupHealth.telegramCheckedBy,
-                          )),
+                          subtitle: Text(
+                            _backupHealth.telegramCheckedAtUtc == null
+                                ? 'အဆင့် ၅ — Dad တစ်ယောက်တည်းရှိသောprivate Telegram channel သို့တူညီတဲ့ .emb files ကိုDocument အဖြစ်တင်ပါ'
+                                : '${_healthLine(_backupHealth.telegramCheckedAtUtc, _backupHealth.telegramCheckedBy)}\nDad-only encrypted copy ကိုစစ်ပြီးပါပြီ',
+                          ),
                           trailing: const Icon(Icons.checklist_outlined),
                           onTap: () => _showOffsiteChecklist(teraBox: false),
                         ),
@@ -1053,7 +1092,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Notification မပေါ်လာနိုင်သောဖုန်းများတွင်လည်း Settings ဖွင့်လျှင်ဒီ shared due card ကိုမြင်ရမယ်။ Passphrase၊ TeraBox login နဲ့ Telegram login ကိုapp/Firestore ထဲမသိမ်းဘူး။',
+                          'အဆင့် ၆ — ဒီဖုန်းမှာ၆ လ reminder ဖွင့်ပါ။ Notification မပေါ်လျှင်လည်း Settings ဖွင့်ရာတွင်ဒီ shared due card ကိုမြင်ရမယ်။ Passphrase၊ TeraBox login နဲ့ Telegram login ကိုapp/Firestore ထဲမသိမ်းဘူး။',
                           style: TextStyle(color: muted, fontSize: 12, height: 1.35),
                         ),
                       ],

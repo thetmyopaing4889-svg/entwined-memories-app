@@ -7,12 +7,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// parent-provided creator label. Archive passphrases, TeraBox credentials and
 /// Telegram credentials must never be placed in this model or in Firestore.
 class BackupHealthStatus {
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
   final String? latestSnapshotId;
   final DateTime? latestSnapshotCreatedAtUtc;
   final int latestSnapshotFileCount;
   final int latestSnapshotPartCount;
+  final int latestSnapshotPhotoCount;
+  final int latestSnapshotVideoCount;
+  final int latestSnapshotJournalEventCount;
+  final int latestSnapshotExportCount;
+  final String? latestSnapshotScope;
   final String? latestSnapshotCreatedBy;
   final DateTime? latestVerifiedAtUtc;
   final String? latestVerifiedBy;
@@ -30,6 +35,11 @@ class BackupHealthStatus {
     this.latestSnapshotCreatedAtUtc,
     this.latestSnapshotFileCount = 0,
     this.latestSnapshotPartCount = 0,
+    this.latestSnapshotPhotoCount = 0,
+    this.latestSnapshotVideoCount = 0,
+    this.latestSnapshotJournalEventCount = 0,
+    this.latestSnapshotExportCount = 0,
+    this.latestSnapshotScope,
     this.latestSnapshotCreatedBy,
     this.latestVerifiedAtUtc,
     this.latestVerifiedBy,
@@ -50,6 +60,11 @@ class BackupHealthStatus {
       latestSnapshotCreatedAtUtc: _asUtc(raw['latestSnapshotCreatedAtUtc']),
       latestSnapshotFileCount: _asInt(raw['latestSnapshotFileCount']),
       latestSnapshotPartCount: _asInt(raw['latestSnapshotPartCount']),
+      latestSnapshotPhotoCount: _asInt(raw['latestSnapshotPhotoCount']),
+      latestSnapshotVideoCount: _asInt(raw['latestSnapshotVideoCount']),
+      latestSnapshotJournalEventCount: _asInt(raw['latestSnapshotJournalEventCount']),
+      latestSnapshotExportCount: _asInt(raw['latestSnapshotExportCount']),
+      latestSnapshotScope: _cleanString(raw['latestSnapshotScope']),
       latestSnapshotCreatedBy: _cleanString(raw['latestSnapshotCreatedBy']),
       latestVerifiedAtUtc: _asUtc(raw['latestVerifiedAtUtc']),
       latestVerifiedBy: _cleanString(raw['latestVerifiedBy']),

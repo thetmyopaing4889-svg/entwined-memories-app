@@ -54,11 +54,14 @@ class MainActivity : FlutterActivity() {
         private const val VAULT_ROOT = "Pictures/Entwined Memories Originals"
         private const val JOURNAL_PREFERENCES = "family_memory_journal"
         private const val JOURNAL_TREE_URI_KEY = "archive_tree_uri"
+        private const val ORIGINAL_VAULT_PREFERENCES = "original_vault_snapshot"
+        private const val ORIGINAL_VAULT_TREE_URI_KEY = "original_vault_tree_uri"
         private const val JOURNAL_ROOT_DIRECTORY = "Entwined Memories Archive"
         private const val JOURNAL_EVENTS_DIRECTORY = "Journal Events"
         private const val JOURNAL_FOLDER_REQUEST_CODE = 9421
         private const val SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE = 9422
         private const val SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE = 9423
+        private const val ORIGINAL_VAULT_FOLDER_REQUEST_CODE = 9424
         private const val SNAPSHOT_CHANNEL = "entwined_memories/encrypted_snapshot"
         private const val DIAGNOSTIC_CHANNEL = "entwined_memories/crash_diagnostics"
         private const val DIAGNOSTIC_FILE_NAME = "latest_flutter_framework_diagnostic.txt"
@@ -91,6 +94,8 @@ class MainActivity : FlutterActivity() {
         val errorMessage: String? = null,
     )
     private var pendingJournalFolderCompletion: PendingJournalFolderCompletion? = null
+    private var pendingOriginalVaultFolderResult: MethodChannel.Result? = null
+    private var pendingOriginalVaultFolderCompletion: PendingJournalFolderCompletion? = null
     private var activityIsPostResumed = false
     private data class PendingSnapshotRestore(
         val passphrase: String,
@@ -126,7 +131,9 @@ class MainActivity : FlutterActivity() {
         snapshotChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SNAPSHOT_CHANNEL)
         snapshotChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
-                "createIncrementalSnapshot" -> createIncrementalSnapshot(call, result)
+                "isOriginalVaultFolderSelected" -> result.success(originalVaultTreeUri() != null)
+                "ensureOriginalVaultFolderSelected" -> ensureOriginalVaultFolderSelected(result)
+                "createCompleteSnapshot" -> createCompleteSnapshot(call, result)
                 "verifyLatestSnapshot" -> verifyLatestSnapshot(call, result)
                 "restoreSnapshotFromSelectedFolder" -> restoreSnapshotFromSelectedFolder(call, result)
                 else -> result.notImplemented()
@@ -190,6 +197,7 @@ class MainActivity : FlutterActivity() {
         super.onPostResume()
         activityIsPostResumed = true
         deliverPendingJournalFolderCompletionWhenSafe()
+        deliverPendingOriginalVaultFolderCompletionWhenSafe()
     }
 
     override fun onPause() {
@@ -223,6 +231,7 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             JOURNAL_FOLDER_REQUEST_CODE -> handleJournalFolderResult(resultCode, data)
+            ORIGINAL_VAULT_FOLDER_REQUEST_CODE -> handleOriginalVaultFolderResult(resultCode, data)
             SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE -> handleSnapshotSourceFolderResult(resultCode, data)
             SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE -> handleSnapshotRestoreFolderResult(resultCode, data)
         }
@@ -408,6 +417,18 @@ class MainActivity : FlutterActivity() {
             null,
         )
         pendingJournalFolderCompletion = null
+        pendingOriginalVaultFolderResult?.error(
+            "original_vault_folder_interrupted",
+            "Original Vault folder selection was interrupted.",
+            null,
+        )
+        pendingOriginalVaultFolderResult = null
+        pendingOriginalVaultFolderCompletion?.result?.error(
+            "original_vault_folder_interrupted",
+            "Original Vault folder selection was interrupted.",
+            null,
+        )
+        pendingOriginalVaultFolderCompletion = null
         pendingSnapshotRestore?.result?.error(
             "snapshot_restore_interrupted",
             "Encrypted backup restore was interrupted.",
@@ -448,6 +469,98 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             pendingJournalFolderResult = null
             result.error("journal_folder_failed", error.message, null)
+        }
+    }
+
+    private fun originalVaultPreferences() = getSharedPreferences(ORIGINAL_VAULT_PREFERENCES, MODE_PRIVATE)
+
+    private fun originalVaultTreeUri(): Uri? {
+        val raw = originalVaultPreferences().getString(ORIGINAL_VAULT_TREE_URI_KEY, null) ?: return null
+        return runCatching { Uri.parse(raw) }.getOrNull()
+    }
+
+    private fun ensureOriginalVaultFolderSelected(result: MethodChannel.Result) {
+        if (originalVaultTreeUri() != null) {
+            result.success(mapOf("configured" to true))
+            return
+        }
+        if (pendingOriginalVaultFolderResult != null) {
+            result.error("original_vault_folder_busy", "Original Vault folder picker is already open.", null)
+            return
+        }
+        pendingOriginalVaultFolderResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            }
+            startActivityForResult(intent, ORIGINAL_VAULT_FOLDER_REQUEST_CODE)
+        } catch (error: Exception) {
+            pendingOriginalVaultFolderResult = null
+            result.error("original_vault_folder_failed", error.message, null)
+        }
+    }
+
+    private fun handleOriginalVaultFolderResult(resultCode: Int, data: Intent?) {
+        val pendingResult = pendingOriginalVaultFolderResult ?: return
+        pendingOriginalVaultFolderResult = null
+        val treeUri = data?.data
+        if (resultCode != RESULT_OK || treeUri == null) {
+            pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                errorCode = "original_vault_folder_cancelled",
+                errorMessage = "No Original Vault folder was selected.",
+            )
+            deliverPendingOriginalVaultFolderCompletionWhenSafe()
+            return
+        }
+        try {
+            takeTreePermission(treeUri, data.flags)
+            validateOriginalVaultTree(treeUri)
+            originalVaultPreferences().edit().putString(ORIGINAL_VAULT_TREE_URI_KEY, treeUri.toString()).apply()
+            pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                payload = mapOf("configured" to true, "treeUri" to treeUri.toString()),
+            )
+        } catch (error: Exception) {
+            pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
+                result = pendingResult,
+                errorCode = "original_vault_folder_failed",
+                errorMessage = error.message,
+            )
+        }
+        deliverPendingOriginalVaultFolderCompletionWhenSafe()
+    }
+
+    private fun validateOriginalVaultTree(treeUri: Uri) {
+        val root = treeDocumentUri(treeUri)
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        val displayName = contentResolver.query(root, projection, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+        if (displayName != "Entwined Memories Originals") {
+            throw IllegalArgumentException(
+                "Select the Entwined Memories Originals folder itself, not Pictures or another folder.",
+            )
+        }
+    }
+
+    private fun deliverPendingOriginalVaultFolderCompletionWhenSafe() {
+        if (!activityIsPostResumed || pendingOriginalVaultFolderCompletion == null) return
+        mainHandler.post {
+            if (!activityIsPostResumed) return@post
+            val completion = pendingOriginalVaultFolderCompletion ?: return@post
+            pendingOriginalVaultFolderCompletion = null
+            if (completion.payload != null) {
+                completion.result.success(completion.payload)
+            } else {
+                completion.result.error(
+                    completion.errorCode ?: "original_vault_folder_failed",
+                    completion.errorMessage,
+                    null,
+                )
+            }
         }
     }
 
@@ -772,7 +885,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         val sha256: String,
     )
 
-    private fun createIncrementalSnapshot(call: MethodCall, result: MethodChannel.Result) {
+    private fun createCompleteSnapshot(call: MethodCall, result: MethodChannel.Result) {
         val passphrase = call.argument<String>("passphrase")
         if (passphrase == null || passphrase.length < 16) {
             result.error(
@@ -782,15 +895,24 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             )
             return
         }
-        val treeUri = journalTreeUri()
-        if (treeUri == null) {
+        val journalUri = journalTreeUri()
+        if (journalUri == null) {
             result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
+            return
+        }
+        val originalVaultUri = originalVaultTreeUri()
+        if (originalVaultUri == null) {
+            result.error(
+                "original_vault_folder_required",
+                "Select Pictures/Entwined Memories Originals before creating a complete backup.",
+                null,
+            )
             return
         }
 
         vaultExecutor.execute {
             try {
-                val snapshot = buildIncrementalSnapshot(treeUri, passphrase)
+                val snapshot = buildCompleteSnapshot(journalUri, originalVaultUri, passphrase)
                 mainHandler.post { result.success(snapshot) }
             } catch (error: Exception) {
                 mainHandler.post { result.error("snapshot_failed", error.message, null) }
@@ -798,21 +920,29 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         }
     }
 
-    private fun buildIncrementalSnapshot(treeUri: Uri, passphrase: String): Map<String, Any> {
-        val cursorMillis = snapshotPreferences().getLong(SNAPSHOT_CURSOR_KEY, 0L)
-        val inputs = collectSnapshotInputs(treeUri, cursorMillis)
-        if (inputs.isEmpty()) {
-            return mapOf(
-                "created" to false,
-                "fileCount" to 0,
-                "parts" to emptyList<String>(),
-                "createdAtUtc" to utcTimestamp(),
+    /**
+     * Every snapshot is intentionally standalone. Manual TeraBox/Telegram copies
+     * must never depend on an earlier incremental chain that a parent could miss.
+     */
+    private fun buildCompleteSnapshot(
+        journalUri: Uri,
+        originalVaultUri: Uri,
+        passphrase: String,
+    ): Map<String, Any> {
+        val inputs = collectCompleteSnapshotInputs(journalUri, originalVaultUri)
+        val coverage = snapshotCoverage(inputs)
+        if ((coverage["photos"] ?: 0) + (coverage["videos"] ?: 0) == 0) {
+            throw IllegalStateException(
+                "No Original Vault photo or video was found. Select Pictures/Entwined Memories Originals and confirm that it contains your family originals before backing up.",
             )
+        }
+        if (inputs.isEmpty()) {
+            throw IllegalStateException("No family archive files were found for encrypted backup.")
         }
 
         val generatedAt = utcTimestamp()
         val snapshotId = "snapshot_${System.currentTimeMillis()}"
-        val root = treeDocumentUri(treeUri)
+        val root = treeDocumentUri(journalUri)
         val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
         val backupsDirectory = ensureJournalDirectory(archiveDirectory, ENCRYPTED_BACKUPS_DIRECTORY)
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
@@ -846,7 +976,8 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                             put("schemaVersion", 1)
                             put("snapshotId", snapshotId)
                             put("createdAtUtc", generatedAt)
-                            put("incrementalAfterUtcMillis", cursorMillis)
+                            put("snapshotScope", "complete")
+                            put("coverage", JSONObject(coverage))
                             put("encryption", JSONObject().apply {
                                 put("container", ENCRYPTED_BACKUP_MAGIC)
                                 put("cipher", "AES-256-GCM")
@@ -870,12 +1001,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 }
             }
 
-            // MediaStore DATE_ADDED is second-granular. Keep a two-second overlap
-            // so a newly created original can never be missed between snapshots.
-            val completedMillis = System.currentTimeMillis()
-            val nextCursorMillis = (completedMillis - 2_000L).coerceAtLeast(0L)
             snapshotPreferences().edit()
-                .putLong(SNAPSHOT_CURSOR_KEY, nextCursorMillis)
                 .putString(SNAPSHOT_LAST_ID_KEY, snapshotId)
                 .apply()
             return mapOf(
@@ -884,7 +1010,8 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 "fileCount" to inputs.size,
                 "parts" to splitOutput.partUris.map(Uri::toString),
                 "createdAtUtc" to generatedAt,
-                "incrementalAfterUtcMillis" to cursorMillis,
+                "snapshotScope" to "complete",
+                "coverage" to coverage,
             )
         } catch (error: Exception) {
             splitOutput.deleteParts()
@@ -911,62 +1038,88 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         }
     }
 
-    private fun collectSnapshotInputs(treeUri: Uri, afterUtcMillis: Long): List<SnapshotInput> {
+    private fun collectCompleteSnapshotInputs(
+        journalTreeUri: Uri,
+        originalVaultTreeUri: Uri,
+    ): List<SnapshotInput> {
         val inputs = mutableListOf<SnapshotInput>()
-        inputs += collectVaultMediaInputs(VaultMediaKind.PHOTO, afterUtcMillis)
-        inputs += collectVaultMediaInputs(VaultMediaKind.VIDEO, afterUtcMillis)
-
-        val root = treeDocumentUri(treeUri)
-        val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+        collectOriginalVaultDocumentInputs(
+            treeDocumentUri(originalVaultTreeUri),
+            "",
+            inputs,
+        )
+        val journalRoot = treeDocumentUri(journalTreeUri)
+        val archiveDirectory = ensureJournalDirectory(journalRoot, JOURNAL_ROOT_DIRECTORY)
+        // Long.MIN_VALUE intentionally includes the whole journal tree. A complete
+        // snapshot must restore by itself and must not depend on earlier packs.
         collectJournalDocumentInputs(
             archiveDirectory,
             "family-memory-journal",
-            afterUtcMillis,
+            Long.MIN_VALUE,
             inputs,
         )
         return inputs.sortedBy { input -> input.archivePath }
     }
 
-    private fun collectVaultMediaInputs(
-        mediaKind: VaultMediaKind,
-        afterUtcMillis: Long,
-    ): List<SnapshotInput> {
-        val collection = mediaCollection(mediaKind)
-        val projection = arrayOf(
-            MediaStore.MediaColumns._ID,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.RELATIVE_PATH,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_ADDED,
+    private fun collectOriginalVaultDocumentInputs(
+        parentUri: Uri,
+        relativePath: String,
+        destination: MutableList<SnapshotInput>,
+    ) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
         )
-        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("$VAULT_ROOT/%")
-        val inputs = mutableListOf<SnapshotInput>()
-        contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-            val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-            val pathColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
-            val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            val modifiedColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
             while (cursor.moveToNext()) {
-                val addedMillis = cursor.getLong(dateAddedColumn) * 1000L
-                if (addedMillis <= afterUtcMillis) continue
-                val uri = Uri.withAppendedPath(collection, cursor.getLong(idColumn).toString())
-                val relativePath = cursor.getString(pathColumn).trimEnd('/')
-                val displayName = cursor.getString(nameColumn)
-                val kindPath = if (mediaKind == VaultMediaKind.PHOTO) "photos" else "videos"
-                inputs += SnapshotInput(
-                    archivePath = "original-media/$kindPath/$relativePath/$displayName",
-                    bytes = cursor.getLong(sizeColumn),
-                    modifiedUtcMillis = addedMillis,
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(parentUri, cursor.getString(idColumn))
+                val name = cursor.getString(nameColumn)
+                val mime = cursor.getString(mimeColumn)
+                if (name.startsWith(".st")) continue // Syncthing metadata, never family media.
+                val childPath = if (relativePath.isBlank()) name else "$relativePath/$name"
+                if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    collectOriginalVaultDocumentInputs(documentUri, childPath, destination)
+                    continue
+                }
+                val isVideo = childPath == "Videos" || childPath.startsWith("Videos/")
+                val archivePath = if (isVideo) {
+                    "original-media/videos/${childPath.removePrefix("Videos/")}"
+                } else {
+                    "original-media/photos/$childPath"
+                }
+                destination += SnapshotInput(
+                    archivePath = archivePath,
+                    bytes = cursor.getLong(sizeColumn).coerceAtLeast(0L),
+                    modifiedUtcMillis = cursor.getLong(modifiedColumn).coerceAtLeast(0L),
                     openInput = {
-                        contentResolver.openInputStream(uri)
+                        contentResolver.openInputStream(documentUri)
                             ?: throw FileNotFoundException("An Original Vault media file could not be opened.")
                     },
                 )
             }
         }
-        return inputs
+    }
+
+    private fun snapshotCoverage(inputs: List<SnapshotInput>): Map<String, Int> {
+        fun count(prefix: String) = inputs.count { input -> input.archivePath.startsWith(prefix) }
+        return linkedMapOf(
+            "photos" to count("original-media/photos/"),
+            "videos" to count("original-media/videos/"),
+            "journalEvents" to count("family-memory-journal/Journal Events/"),
+            "exports" to count("family-memory-journal/Exports/"),
+        )
     }
 
     private fun collectJournalDocumentInputs(

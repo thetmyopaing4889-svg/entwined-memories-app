@@ -275,6 +275,11 @@ class MemoryService {
     required DateTime createdAtUtc,
     required int fileCount,
     required int partCount,
+    required int photoCount,
+    required int videoCount,
+    required int journalEventCount,
+    required int exportCount,
+    required String snapshotScope,
     required String createdBy,
   }) {
     final createdAt = createdAtUtc.toUtc();
@@ -284,7 +289,23 @@ class MemoryService {
       'latestSnapshotCreatedAtUtc': createdAt.toIso8601String(),
       'latestSnapshotFileCount': fileCount,
       'latestSnapshotPartCount': partCount,
+      'latestSnapshotPhotoCount': photoCount,
+      'latestSnapshotVideoCount': videoCount,
+      'latestSnapshotJournalEventCount': journalEventCount,
+      'latestSnapshotExportCount': exportCount,
+      'latestSnapshotScope': snapshotScope,
       'latestSnapshotCreatedBy': _backupActor(createdBy),
+      // These checks apply to the prior snapshot only. A new standalone pack
+      // must be verified, restored, and copied off-site again before its
+      // health rows can be marked complete.
+      'latestVerifiedAtUtc': null,
+      'latestVerifiedBy': null,
+      'lastRestoreDrillAtUtc': null,
+      'lastRestoreDrillBy': null,
+      'teraBoxCheckedAtUtc': null,
+      'teraBoxCheckedBy': null,
+      'telegramCheckedAtUtc': null,
+      'telegramCheckedBy': null,
       'nextHealthCheckDueAtUtc':
           BackupHealthStatus.sixMonthsAfter(createdAt).toIso8601String(),
     });

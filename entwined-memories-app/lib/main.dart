@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'firebase_options.dart';
 import 'screens/app_root.dart';
 import 'services/app_settings.dart';
+import 'services/crash_diagnostic_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  installCrashDiagnosticCapture();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );

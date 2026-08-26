@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/services.dart';
 import '../models/backup_health.dart';
 import '../services/app_settings.dart';
 import '../services/backup_reminder_service.dart';
 import '../services/memory_service.dart';
 import '../services/family_memory_journal_service.dart';
 import '../services/encrypted_snapshot_service.dart';
+import '../services/crash_diagnostic_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -30,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _playbackPreference = 'auto';
   ThemeMode _themeMode = ThemeMode.light;
   AppLanguage _language = AppLanguage.myanmar;
+  String? _latestFrameworkDiagnostic;
 
   @override
   void initState() {
@@ -39,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final familySettings = await MemoryService.loadFamilySettings();
+    final diagnostic = await CrashDiagnosticService.readLatest();
     String version = '';
     try {
       final info = await PackageInfo.fromPlatform();
@@ -55,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _backupHealth = familySettings.backupHealth;
       _themeMode = settings.themeMode;
       _language = settings.language;
+      _latestFrameworkDiagnostic = diagnostic;
       _loading = false;
     });
   }
@@ -63,6 +68,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _showFrameworkDiagnostic() async {
+    final diagnostic = await CrashDiagnosticService.readLatest();
+    if (!mounted) return;
+    if (diagnostic == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('ဒီ assertion diagnostic ကိုမတွေ့သေးဘူး'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    setState(() => _latestFrameworkDiagnostic = diagnostic);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Documents picker diagnostic'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              diagnostic,
+              style: const TextStyle(fontSize: 12, height: 1.35),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: diagnostic));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Diagnostic stack ကိုcopy လုပ်ပြီးပြီ'),
+                  behavior: SnackBarBehavior.floating,
+                ));
+              }
+            },
+            child: const Text('Copy diagnostic'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _save() async {
@@ -828,7 +880,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : _showEncryptedBackupDialog,
                   ),
                 ),
-                const SizedBox(height: 12),
+                if (_latestFrameworkDiagnostic != null) ...[
+                  Card(
+                    color: const Color(0xFFFFF0F2),
+                    child: ListTile(
+                      leading: const Icon(Icons.bug_report_outlined,
+                          color: Colors.deepOrange),
+                      title: const Text('Documents picker diagnostic available'),
+                      subtitle: const Text(
+                        'ဒီဖုန်းတွင်ဖြစ်ခဲ့သော _dependents assertion stack ကိုသာကြည့်/copy လုပ်နိုင်တယ်။ Photo, video, password, TeraBox/Telegram login ကိုမသိမ်းဘူး။',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _showFrameworkDiagnostic,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 Card(
                   color: backupDue
                       ? const Color(0xFFFFF0F2)

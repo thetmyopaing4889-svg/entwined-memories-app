@@ -60,6 +60,8 @@ class MainActivity : FlutterActivity() {
         private const val SNAPSHOT_SOURCE_FOLDER_REQUEST_CODE = 9422
         private const val SNAPSHOT_RESTORE_FOLDER_REQUEST_CODE = 9423
         private const val SNAPSHOT_CHANNEL = "entwined_memories/encrypted_snapshot"
+        private const val DIAGNOSTIC_CHANNEL = "entwined_memories/crash_diagnostics"
+        private const val DIAGNOSTIC_FILE_NAME = "latest_flutter_framework_diagnostic.txt"
         private const val SNAPSHOT_PREFERENCES = "encrypted_snapshot"
         private const val SNAPSHOT_CURSOR_KEY = "last_completed_snapshot_utc_millis"
         private const val SNAPSHOT_LAST_ID_KEY = "last_completed_snapshot_id"
@@ -130,6 +132,58 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DIAGNOSTIC_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "recordFlutterDiagnostic" -> recordFlutterDiagnostic(call, result)
+                    "readLatestFlutterDiagnostic" -> readLatestFlutterDiagnostic(result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun recordFlutterDiagnostic(call: MethodCall, result: MethodChannel.Result) {
+        val kind = call.argument<String>("kind") ?: "flutter_framework_error"
+        val exception = call.argument<String>("exception") ?: ""
+        val stack = call.argument<String>("stack") ?: ""
+        val context = call.argument<String>("context") ?: ""
+        val library = call.argument<String>("library") ?: ""
+        val recordedAtUtc = call.argument<String>("recordedAtUtc") ?: ""
+        if (!exception.contains("_dependents.isEmpty")) {
+            result.success(false)
+            return
+        }
+
+        try {
+            val body = buildString {
+                appendLine("Entwined Memories local diagnostic")
+                appendLine("kind: ${truncateDiagnostic(kind, 120)}")
+                appendLine("recordedAtUtc: ${truncateDiagnostic(recordedAtUtc, 120)}")
+                appendLine("library: ${truncateDiagnostic(library, 500)}")
+                appendLine("context: ${truncateDiagnostic(context, 1_000)}")
+                appendLine("exception:")
+                appendLine(truncateDiagnostic(exception, 4_000))
+                appendLine("stack:")
+                appendLine(truncateDiagnostic(stack, 24_000))
+            }
+            File(filesDir, DIAGNOSTIC_FILE_NAME).writeText(body, Charsets.UTF_8)
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("diagnostic_write_failed", error.message, null)
+        }
+    }
+
+    private fun readLatestFlutterDiagnostic(result: MethodChannel.Result) {
+        try {
+            val file = File(filesDir, DIAGNOSTIC_FILE_NAME)
+            result.success(if (file.exists()) file.readText(Charsets.UTF_8) else null)
+        } catch (error: Exception) {
+            result.error("diagnostic_read_failed", error.message, null)
+        }
+    }
+
+    private fun truncateDiagnostic(value: String, limit: Int): String {
+        return if (value.length <= limit) value else value.take(limit) + "\n[truncated]"
     }
 
     override fun onPostResume() {

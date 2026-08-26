@@ -221,14 +221,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  /// A dialog's result resolves before its reverse transition necessarily
+  /// removes the OverlayEntry. Platform pickers must wait for the route to be
+  /// fully completed, otherwise Flutter can rebuild/deactivate that Overlay
+  /// while it still has inherited dependents.
+  Future<T?> _showSettledDialog<T>(WidgetBuilder builder) async {
+    if (!mounted) return null;
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final route = DialogRoute<T>(
+      context: context,
+      builder: builder,
+      barrierDismissible: true,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+    );
+    final value = await navigator.push<T>(route);
+    await route.completed;
+    return value;
+  }
+
   Future<void> _showEncryptedBackupDialog() async {
     final passphraseController = TextEditingController();
     final confirmController = TextEditingController();
     String? validationMessage;
 
-    final passphrase = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
+    final passphrase = await _showSettledDialog<String>(
+      (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('Encrypted Backup ဖန်တီးမယ်'),
           content: SingleChildScrollView(
@@ -396,9 +413,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) async {
     final controller = TextEditingController();
     String? validationMessage;
-    final passphrase = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
+    final passphrase = await _showSettledDialog<String>(
+      (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(title),
           content: SingleChildScrollView(

@@ -516,16 +516,12 @@ class MainActivity : FlutterActivity() {
             return
         }
         try {
-            // Do not query the DocumentsProvider while its picker Activity is still
-            // closing. Some Android implementations can terminate the calling app
-            // during that transition. The selected tree document ID is already in
-            // the returned URI, so validate it without any provider I/O first.
-            validateOriginalVaultTree(treeUri)
-            takeTreePermission(treeUri, data.flags)
-            originalVaultPreferences().edit().putString(ORIGINAL_VAULT_TREE_URI_KEY, treeUri.toString()).apply()
+            // Do not query or persist the tree inside the picker callback. The
+            // temporary URI grant remains available after this Activity result;
+            // validation and persistence are deferred until the host is resumed.
             pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
                 result = pendingResult,
-                payload = mapOf("configured" to true, "treeUri" to treeUri.toString()),
+                payload = mapOf("treeUri" to treeUri.toString(), "grantFlags" to data.flags),
             )
         } catch (error: Exception) {
             pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
@@ -537,17 +533,28 @@ class MainActivity : FlutterActivity() {
         deliverPendingOriginalVaultFolderCompletionWhenSafe()
     }
 
-    private fun validateOriginalVaultTree(treeUri: Uri) {
-        // ACTION_OPEN_DOCUMENT_TREE returns the selected directory in the tree
-        // document ID. Checking the exact final path keeps the archive scope narrow
-        // without reopening the provider while DocumentsUI is still unwinding.
-        val documentId = DocumentsContract.getTreeDocumentId(treeUri).trimEnd('/')
-        val expectedSuffix = ":$VAULT_ROOT"
-        if (!documentId.endsWith(expectedSuffix) || documentId.length <= expectedSuffix.length) {
-            throw IllegalArgumentException(
-                "Select the Entwined Memories Originals folder itself, not Pictures or another folder.",
+    private fun validateOriginalVaultTree(treeUri: Uri): String {
+        // This runs only after DocumentsUI has completely returned to the host
+        // Activity. Some providers use volume-specific document IDs, so verify the
+        // provider's actual display name rather than assuming a device-ID format.
+        val root = treeDocumentUri(treeUri)
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        val displayName = try {
+            contentResolver.query(root, projection, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        } catch (error: Exception) {
+            throw IllegalStateException(
+                "Android could not inspect the selected Original Vault folder after the picker closed (${error.javaClass.simpleName}).",
             )
         }
+        if (displayName != "Entwined Memories Originals") {
+            val returnedName = displayName?.take(80) ?: "no folder name"
+            throw IllegalArgumentException(
+                "Android returned '$returnedName'. Select the Entwined Memories Originals folder itself, not Pictures or another folder.",
+            )
+        }
+        return displayName
     }
 
     private fun deliverPendingOriginalVaultFolderCompletionWhenSafe() {
@@ -556,7 +563,36 @@ class MainActivity : FlutterActivity() {
             if (!activityIsPostResumed) return@post
             val completion = pendingOriginalVaultFolderCompletion ?: return@post
             pendingOriginalVaultFolderCompletion = null
-            if (completion.payload != null) {
+            val treeUriText = completion.payload?.get("treeUri") as? String
+            val grantFlags = completion.payload?.get("grantFlags") as? Int
+            if (treeUriText != null && grantFlags != null) {
+                // Wait until the external picker has returned and run provider I/O
+                // off the UI thread. This keeps the validation strict without the
+                // Android-specific crash/mismatch seen during the result callback.
+                vaultExecutor.execute {
+                    try {
+                        val treeUri = Uri.parse(treeUriText)
+                        val displayName = validateOriginalVaultTree(treeUri)
+                        takeTreePermission(treeUri, grantFlags)
+                        originalVaultPreferences().edit()
+                            .putString(ORIGINAL_VAULT_TREE_URI_KEY, treeUri.toString())
+                            .apply()
+                        mainHandler.post {
+                            completion.result.success(
+                                mapOf("configured" to true, "folderName" to displayName),
+                            )
+                        }
+                    } catch (error: Exception) {
+                        mainHandler.post {
+                            completion.result.error(
+                                "original_vault_folder_failed",
+                                error.message,
+                                null,
+                            )
+                        }
+                    }
+                }
+            } else if (completion.payload != null) {
                 completion.result.success(completion.payload)
             } else {
                 completion.result.error(

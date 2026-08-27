@@ -66,6 +66,8 @@ class MainActivity : FlutterActivity() {
         private const val DIAGNOSTIC_CHANNEL = "entwined_memories/crash_diagnostics"
         private const val DIAGNOSTIC_FILE_NAME = "latest_flutter_framework_diagnostic.txt"
         private const val BACKUP_DIAGNOSTIC_FILE_NAME = "latest_encrypted_backup_diagnostic.txt"
+        private const val PREPARED_RECOVERY_CATALOG_FILE_NAME = "prepared_recovery_catalog.json"
+        private const val MAX_RECOVERY_CATALOG_BYTES = 25 * 1024 * 1024
         private const val SNAPSHOT_PREFERENCES = "encrypted_snapshot"
         private const val SNAPSHOT_CURSOR_KEY = "last_completed_snapshot_utc_millis"
         private const val SNAPSHOT_LAST_ID_KEY = "last_completed_snapshot_id"
@@ -125,6 +127,8 @@ class MainActivity : FlutterActivity() {
                     "isArchiveFolderSelected" -> result.success(journalTreeUri() != null)
                     "ensureArchiveFolderSelected" -> ensureJournalFolderSelected(result)
                     "appendJournalEvent" -> appendJournalEvent(call, result)
+                    "writeRecoveryCatalog" -> writeRecoveryCatalog(call, result)
+                    "prepareRestoredRecoveryCatalog" -> prepareRestoredRecoveryCatalog(call, result)
                     "exportPortableArchive" -> exportPortableArchive(result)
                     else -> result.notImplemented()
                 }
@@ -134,8 +138,10 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "isOriginalVaultFolderSelected" -> result.success(originalVaultTreeUri() != null)
                 "ensureOriginalVaultFolderSelected" -> ensureOriginalVaultFolderSelected(result)
-                "createCompleteSnapshot" -> createCompleteSnapshot(call, result)
-                "readLatestBackupDiagnostic" -> readLatestBackupDiagnostic(result)
+                                    "createJournalSnapshot" -> createJournalSnapshot(call, result)
+                    "checkRestoredVaultReferences" -> checkRestoredVaultReferences(call, result)
+                    "readLatestBackupDiagnostic" -> readLatestBackupDiagnostic(result)
+
                 "verifyLatestSnapshot" -> verifyLatestSnapshot(call, result)
                 "restoreSnapshotFromSelectedFolder" -> restoreSnapshotFromSelectedFolder(call, result)
                 else -> result.notImplemented()
@@ -677,6 +683,317 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /**
+     * Writes a current active-post catalog before the Journal-only encrypted
+     * snapshot starts. The caller supplies only Firestore post metadata; no raw
+     * original media, passphrase, or external account credential is accepted.
+     */
+    private fun writeRecoveryCatalog(call: MethodCall, result: MethodChannel.Result) {
+        val fileName = call.argument<String>("fileName")
+        val json = call.argument<String>("json")
+        if (fileName.isNullOrBlank() || json == null) {
+            result.error("invalid_recovery_catalog_arguments", "Recovery Catalog arguments are incomplete.", null)
+            return
+        }
+        if (!fileName.matches(Regex("family_recovery_catalog_[0-9]+\\.json"))) {
+            result.error("invalid_recovery_catalog_filename", "Recovery Catalog filename is invalid.", null)
+            return
+        }
+        val treeUri = journalTreeUri()
+        if (treeUri == null) {
+            result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
+            return
+        }
+        vaultExecutor.execute {
+            try {
+                val root = treeDocumentUri(treeUri)
+                val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
+                val exportsDirectory = ensureJournalDirectory(archiveDirectory, "Exports")
+                val uri = writeNewJournalDocument(
+                    exportsDirectory,
+                    fileName,
+                    "application/json",
+                    json,
+                )
+                mainHandler.post { result.success(mapOf("fileName" to fileName, "uri" to uri.toString())) }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("recovery_catalog_write_failed", error.message, null) }
+            }
+        }
+    }
+
+    /**
+     * Finds and stages the latest current-post catalog from an already validated
+     * encrypted restore folder. This prepares a preview only; it never writes to
+     * Firestore and it rejects malformed/unexpected catalog structures.
+     */
+    private fun prepareRestoredRecoveryCatalog(call: MethodCall, result: MethodChannel.Result) {
+        val restoreFolderUriText = call.argument<String>("restoreFolderUri")
+        if (restoreFolderUriText.isNullOrBlank()) {
+            result.error("invalid_restore_folder", "A restored Family Archive folder is required.", null)
+            return
+        }
+        val restoreFolderUri = runCatching { Uri.parse(restoreFolderUriText) }.getOrNull()
+        if (restoreFolderUri == null) {
+            result.error("invalid_restore_folder", "The restored Family Archive folder is invalid.", null)
+            return
+        }
+        vaultExecutor.execute {
+            try {
+                val journalDirectory = findJournalChild(restoreFolderUri, "family-memory-journal")
+                    ?: throw FileNotFoundException("The restored archive has no Family Journal folder.")
+                val exportsDirectory = findJournalChild(journalDirectory, "Exports")
+                    ?: throw FileNotFoundException("The restored archive has no Exports folder.")
+                val catalog = findLatestRecoveryCatalog(exportsDirectory)
+                    ?: throw FileNotFoundException("No current Family Recovery Catalog was found in this archive.")
+                if (catalog.bytes !in 1..MAX_RECOVERY_CATALOG_BYTES.toLong()) {
+                    throw IllegalStateException("The Family Recovery Catalog size is invalid.")
+                }
+                val catalogBytes = contentResolver.openInputStream(catalog.uri)?.use { input ->
+                    input.readBytes()
+                } ?: throw FileNotFoundException("The Family Recovery Catalog could not be opened.")
+                if (catalogBytes.size.toLong() != catalog.bytes) {
+                    throw IllegalStateException("The Family Recovery Catalog changed while being prepared.")
+                }
+                val validated = validateRecoveryCatalog(catalogBytes)
+                val staged = File(filesDir, PREPARED_RECOVERY_CATALOG_FILE_NAME)
+                val temporary = File(filesDir, "$PREPARED_RECOVERY_CATALOG_FILE_NAME.tmp")
+                temporary.writeBytes(catalogBytes)
+                if (staged.exists() && !staged.delete()) {
+                    throw IllegalStateException("The previous prepared Recovery Catalog could not be replaced.")
+                }
+                if (!temporary.renameTo(staged)) {
+                    temporary.delete()
+                    throw IllegalStateException("The Recovery Catalog could not be prepared for preview.")
+                }
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "catalogPath" to staged.absolutePath,
+                            "memoryCount" to validated.memoryCount,
+                            "generatedAtUtc" to validated.generatedAtUtc,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("recovery_catalog_prepare_failed", error.message, null) }
+            }
+        }
+    }
+
+    private data class RecoveryCatalogFile(
+        val uri: Uri,
+        val fileName: String,
+        val bytes: Long,
+    )
+
+    private data class ValidatedRecoveryCatalog(
+        val memoryCount: Int,
+        val generatedAtUtc: String,
+    )
+
+    private fun findLatestRecoveryCatalog(parentUri: Uri): RecoveryCatalogFile? {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        val candidates = mutableListOf<RecoveryCatalogFile>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            while (cursor.moveToNext()) {
+                val fileName = cursor.getString(nameColumn)
+                val mimeType = cursor.getString(mimeColumn)
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR ||
+                    !fileName.matches(Regex("family_recovery_catalog_[0-9]+\\.json"))
+                ) continue
+                candidates += RecoveryCatalogFile(
+                    uri = DocumentsContract.buildDocumentUriUsingTree(parentUri, cursor.getString(idColumn)),
+                    fileName = fileName,
+                    bytes = cursor.getLong(sizeColumn).coerceAtLeast(0L),
+                )
+            }
+        }
+        return candidates.maxByOrNull { catalog -> catalog.fileName }
+    }
+
+    private fun validateRecoveryCatalog(bytes: ByteArray): ValidatedRecoveryCatalog {
+        val root = JSONObject(bytes.toString(Charsets.UTF_8))
+        if (root.optInt("schemaVersion", -1) != 1 ||
+            root.optString("kind") != "active-memory-catalog"
+        ) {
+            throw IllegalStateException("The Family Recovery Catalog format is not supported.")
+        }
+        val generatedAtUtc = root.optString("generatedAtUtc").trim()
+        if (generatedAtUtc.isBlank() || generatedAtUtc.length > 80) {
+            throw IllegalStateException("The Family Recovery Catalog timestamp is invalid.")
+        }
+        val memories = root.optJSONArray("memories")
+            ?: throw IllegalStateException("The Family Recovery Catalog has no post list.")
+        if (memories.length() > 100_000) {
+            throw IllegalStateException("The Family Recovery Catalog contains too many posts.")
+        }
+        val ids = mutableSetOf<String>()
+        for (index in 0 until memories.length()) {
+            val memory = memories.optJSONObject(index)
+                ?: throw IllegalStateException("The Family Recovery Catalog contains an invalid post.")
+            val id = memory.optString("id").trim()
+            val dateUtc = memory.optString("dateUtc").trim()
+            if (id.isBlank() || id.length > 200 || dateUtc.isBlank() || dateUtc.length > 80 || !ids.add(id)) {
+                throw IllegalStateException("The Family Recovery Catalog contains an invalid or duplicate post.")
+            }
+        }
+        return ValidatedRecoveryCatalog(memories.length(), generatedAtUtc)
+    }
+
+    /**
+     * Checks only the explicitly selected Original Vault tree after an archive
+     * restore. It uses the deterministic EMP/EMV hash-prefix filenames and byte
+     * counts from Journal event metadata; it never scans the phone's gallery or
+     * reads media contents.
+     */
+    private fun checkRestoredVaultReferences(call: MethodCall, result: MethodChannel.Result) {
+        val restoreFolderUriText = call.argument<String>("restoreFolderUri")
+        val restoreFolderUri = restoreFolderUriText?.let { text -> runCatching { Uri.parse(text) }.getOrNull() }
+        if (restoreFolderUri == null) {
+            result.error("invalid_restore_folder", "A restored Family Archive folder is required.", null)
+            return
+        }
+        val vaultUri = originalVaultTreeUri()
+        if (vaultUri == null) {
+            result.success(
+                mapOf(
+                    "vaultSelected" to false,
+                    "expectedReferences" to 0,
+                    "matchedReferences" to 0,
+                    "missingReferences" to 0,
+                    "ambiguousReferences" to 0,
+                ),
+            )
+            return
+        }
+        vaultExecutor.execute {
+            try {
+                val expected = collectRestoredVaultReferences(restoreFolderUri)
+                val available = mutableMapOf<String, Int>()
+                collectOriginalVaultReferenceKeys(treeDocumentUri(vaultUri), available)
+                var matched = 0
+                var missing = 0
+                var ambiguous = 0
+                expected.forEach { key ->
+                    when (available[key] ?: 0) {
+                        0 -> missing++
+                        1 -> matched++
+                        else -> ambiguous++
+                    }
+                }
+                mainHandler.post {
+                    result.success(
+                        mapOf(
+                            "vaultSelected" to true,
+                            "expectedReferences" to expected.size,
+                            "matchedReferences" to matched,
+                            "missingReferences" to missing,
+                            "ambiguousReferences" to ambiguous,
+                        ),
+                    )
+                }
+            } catch (error: Exception) {
+                mainHandler.post { result.error("vault_reference_check_failed", error.message, null) }
+            }
+        }
+    }
+
+    private fun collectRestoredVaultReferences(restoreFolderUri: Uri): Set<String> {
+        val journalDirectory = findJournalChild(restoreFolderUri, "family-memory-journal")
+            ?: throw FileNotFoundException("The restored archive has no Family Journal folder.")
+        val eventsDirectory = findJournalChild(journalDirectory, JOURNAL_EVENTS_DIRECTORY)
+            ?: throw FileNotFoundException("The restored archive has no Journal Events folder.")
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            eventsDirectory,
+            DocumentsContract.getDocumentId(eventsDirectory),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        val references = mutableSetOf<String>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameColumn)
+                if (cursor.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR ||
+                    !name.matches(Regex("event_[0-9]+_[0-9a-f-]{36}\\.json")) ||
+                    cursor.getLong(sizeColumn) !in 1..1_048_576L
+                ) continue
+                val eventUri = DocumentsContract.buildDocumentUriUsingTree(
+                    eventsDirectory,
+                    cursor.getString(idColumn),
+                )
+                val event = contentResolver.openInputStream(eventUri)?.use { input ->
+                    runCatching { JSONObject(input.readBytes().toString(Charsets.UTF_8)) }.getOrNull()
+                } ?: continue
+                val archives = event.optJSONArray("vaultArchives") ?: continue
+                for (index in 0 until archives.length()) {
+                    val archive = archives.optJSONObject(index) ?: continue
+                    val hash = archive.optString("sha256").lowercase(Locale.US)
+                    val bytes = archive.optLong("bytes", -1L)
+                    if (hash.matches(Regex("[0-9a-f]{64}")) && bytes > 0L) {
+                        references += "${hash.take(24)}:$bytes"
+                    }
+                }
+            }
+        }
+        return references
+    }
+
+    private fun collectOriginalVaultReferenceKeys(parentUri: Uri, destination: MutableMap<String, Int>) {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri),
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+        )
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_SIZE)
+            while (cursor.moveToNext()) {
+                val documentUri = DocumentsContract.buildDocumentUriUsingTree(parentUri, cursor.getString(idColumn))
+                val name = cursor.getString(nameColumn)
+                if (name.startsWith(".st")) continue
+                if (cursor.getString(mimeColumn) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    collectOriginalVaultReferenceKeys(documentUri, destination)
+                    continue
+                }
+                val match = Regex("^(?:EMP|EMV)_([0-9a-f]{24})\\.[A-Za-z0-9]{1,12}$").matchEntire(name)
+                    ?: continue
+                val bytes = cursor.getLong(sizeColumn).coerceAtLeast(0L)
+                if (bytes <= 0L) continue
+                val key = "${match.groupValues[1]}:$bytes"
+                destination[key] = (destination[key] ?: 0) + 1
+            }
+        }
+    }
+
     private fun writeJournalEvent(treeUri: Uri, fileName: String, json: String): Uri {
         val root = treeDocumentUri(treeUri)
         val archiveDirectory = ensureJournalDirectory(root, JOURNAL_ROOT_DIRECTORY)
@@ -971,7 +1288,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         val sha256: String,
     )
 
-    private fun createCompleteSnapshot(call: MethodCall, result: MethodChannel.Result) {
+    private fun createJournalSnapshot(call: MethodCall, result: MethodChannel.Result) {
         val passphrase = call.argument<String>("passphrase")
         if (passphrase == null || passphrase.length < 16) {
             result.error(
@@ -986,21 +1303,11 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             result.error("journal_folder_required", "Select a Family Memory Journal folder first.", null)
             return
         }
-        val originalVaultUri = originalVaultTreeUri()
-        if (originalVaultUri == null) {
-            result.error(
-                "original_vault_folder_required",
-                "Select Pictures/Entwined Memories Originals before creating a complete backup.",
-                null,
-            )
-            return
-        }
-
         clearBackupDiagnostic()
-        recordBackupDiagnostic("backup_request_accepted")
+        recordBackupDiagnostic("journal_backup_request_accepted")
         vaultExecutor.execute {
             try {
-                val snapshot = buildCompleteSnapshot(journalUri, originalVaultUri, passphrase)
+                val snapshot = buildJournalSnapshot(journalUri, passphrase)
                 mainHandler.post { result.success(snapshot) }
             } catch (error: Exception) {
                 recordBackupDiagnostic(
@@ -1013,16 +1320,16 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
     }
 
     /**
-     * Every snapshot is intentionally standalone. Manual TeraBox/Telegram copies
-     * must never depend on an earlier incremental chain that a parent could miss.
+     * Every Journal snapshot is intentionally standalone. It protects the Family
+     * Archive metadata/history only; original photo/video bytes stay in the
+     * separately synced Pictures Original Vault and are never read here.
      */
-    private fun buildCompleteSnapshot(
+    private fun buildJournalSnapshot(
         journalUri: Uri,
-        originalVaultUri: Uri,
         passphrase: String,
     ): Map<String, Any> {
-        recordBackupDiagnostic("collecting_backup_inputs")
-        val inputs = collectCompleteSnapshotInputs(journalUri, originalVaultUri)
+        recordBackupDiagnostic("collecting_journal_backup_inputs")
+        val inputs = collectJournalSnapshotInputs(journalUri)
         val coverage = snapshotCoverage(inputs)
         val inputBytes = inputs.fold(0L) { total, input -> total + input.bytes }
         recordBackupDiagnostic(
@@ -1036,10 +1343,8 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 "exports" to (coverage["exports"] ?: 0),
             ),
         )
-        if ((coverage["photos"] ?: 0) + (coverage["videos"] ?: 0) == 0) {
-            throw IllegalStateException(
-                "No Original Vault photo or video was found. Select Pictures/Entwined Memories Originals and confirm that it contains your family originals before backing up.",
-            )
+        if ((coverage["journalEvents"] ?: 0) == 0) {
+            throw IllegalStateException("No Family Memory Journal events were found for encrypted backup.")
         }
         if (inputs.isEmpty()) {
             throw IllegalStateException("No family archive files were found for encrypted backup.")
@@ -1085,7 +1390,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                             put("schemaVersion", 1)
                             put("snapshotId", snapshotId)
                             put("createdAtUtc", generatedAt)
-                            put("snapshotScope", "complete")
+                            put("snapshotScope", "journal-only")
                             put("coverage", JSONObject(coverage))
                             put("encryption", JSONObject().apply {
                                 put("container", ENCRYPTED_BACKUP_MAGIC)
@@ -1120,7 +1425,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 "fileCount" to inputs.size,
                 "parts" to splitOutput.partUris.map(Uri::toString),
                 "createdAtUtc" to generatedAt,
-                "snapshotScope" to "complete",
+                "snapshotScope" to "journal-only",
                 "coverage" to coverage,
             )
         } catch (error: Exception) {
@@ -1148,16 +1453,10 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         }
     }
 
-    private fun collectCompleteSnapshotInputs(
+    private fun collectJournalSnapshotInputs(
         journalTreeUri: Uri,
-        originalVaultTreeUri: Uri,
     ): List<SnapshotInput> {
         val inputs = mutableListOf<SnapshotInput>()
-        collectOriginalVaultDocumentInputs(
-            treeDocumentUri(originalVaultTreeUri),
-            "",
-            inputs,
-        )
         val journalRoot = treeDocumentUri(journalTreeUri)
         val archiveDirectory = ensureJournalDirectory(journalRoot, JOURNAL_ROOT_DIRECTORY)
         // Long.MIN_VALUE intentionally includes the whole journal tree. A complete

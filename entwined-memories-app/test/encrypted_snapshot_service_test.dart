@@ -17,7 +17,7 @@ void main() {
     'rejects a short archive passphrase before native work begins',
     () async {
       await expectLater(
-        EncryptedSnapshotService.createCompleteSnapshot(
+        EncryptedSnapshotService.createJournalSnapshot(
           passphrase: 'too-short',
         ),
         throwsA(isA<StateError>()),
@@ -25,73 +25,102 @@ void main() {
     },
   );
 
-  test('requests persistent Original Vault folder selection', () async {
+  test('requests Original Vault selection only for a recovery check', () async {
     MethodCall? received;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-          received = call;
-          return <String, Object>{'configured': true};
-        });
+      received = call;
+      return <String, Object>{'configured': true};
+    });
 
-    await EncryptedSnapshotService.ensureOriginalVaultFolderSelected();
+    await EncryptedSnapshotService
+        .ensureOriginalVaultFolderSelectedForRecoveryCheck();
 
     expect(received?.method, 'ensureOriginalVaultFolderSelected');
   });
 
-  test('reads a privacy-safe native backup diagnostic when available', () async {
+  test('reads a privacy-safe native backup diagnostic when available',
+      () async {
     MethodCall? received;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-          received = call;
-          return 'stage: writing_backup_input\\nposition: 9\\ntotalFiles: 9';
-        });
+      received = call;
+      return 'stage: writing_backup_input\\nposition: 9\\ntotalFiles: 9';
+    });
 
-    final diagnostic = await EncryptedSnapshotService.readLatestBackupDiagnostic();
+    final diagnostic =
+        await EncryptedSnapshotService.readLatestBackupDiagnostic();
 
     expect(received?.method, 'readLatestBackupDiagnostic');
     expect(diagnostic, contains('writing_backup_input'));
     expect(diagnostic, contains('totalFiles: 9'));
   });
 
-  test('parses a complete originals-inclusive snapshot result', () async {
+  test('parses a Journal-only encrypted snapshot result', () async {
     MethodCall? received;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-          received = call;
-          return <String, Object>{
-            'created': true,
-            'snapshotId': 'snapshot_123',
-            'fileCount': 7,
-            'parts': <String>[
-              'content://example/part001.emb',
-              'content://example/part002.emb',
-            ],
-            'createdAtUtc': '2026-08-21T00:00:00.000Z',
-            'snapshotScope': 'complete',
-            'coverage': <String, int>{
-              'photos': 3,
-              'videos': 1,
-              'journalEvents': 2,
-              'exports': 1,
-            },
-          };
-        });
+      received = call;
+      return <String, Object>{
+        'created': true,
+        'snapshotId': 'snapshot_123',
+        'fileCount': 7,
+        'parts': <String>[
+          'content://example/part001.emb',
+          'content://example/part002.emb',
+        ],
+        'createdAtUtc': '2026-08-21T00:00:00.000Z',
+        'snapshotScope': 'journal-only',
+        'coverage': <String, int>{
+          'photos': 0,
+          'videos': 0,
+          'journalEvents': 2,
+          'exports': 2,
+        },
+      };
+    });
 
-    final snapshot = await EncryptedSnapshotService.createCompleteSnapshot(
+    final snapshot = await EncryptedSnapshotService.createJournalSnapshot(
       passphrase: 'correct horse battery staple',
     );
 
-    expect(received?.method, 'createCompleteSnapshot');
+    expect(received?.method, 'createJournalSnapshot');
     expect(received?.arguments, <String, Object>{
       'passphrase': 'correct horse battery staple',
     });
     expect(snapshot.created, isTrue);
     expect(snapshot.snapshotId, 'snapshot_123');
-    expect(snapshot.isCompleteSnapshot, isTrue);
+    expect(snapshot.isJournalOnlySnapshot, isTrue);
+    expect(snapshot.isLegacySnapshot, isFalse);
     expect(snapshot.fileCount, 7);
     expect(snapshot.partUris, hasLength(2));
-    expect(snapshot.coverage.photos, 3);
-    expect(snapshot.coverage.videos, 1);
+    expect(snapshot.coverage.photos, 0);
+    expect(snapshot.coverage.videos, 0);
     expect(snapshot.createdAtUtc, DateTime.utc(2026, 8, 21));
+  });
+
+  test('parses a dedicated Original Vault reference check', () async {
+    MethodCall? received;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      received = call;
+      return <String, Object>{
+        'vaultSelected': true,
+        'expectedReferences': 4,
+        'matchedReferences': 3,
+        'missingReferences': 1,
+        'ambiguousReferences': 0,
+      };
+    });
+
+    final checked = await EncryptedSnapshotService.checkRestoredVaultReferences(
+      'content://example/restore',
+    );
+
+    expect(received?.method, 'checkRestoredVaultReferences');
+    expect(checked.vaultSelected, isTrue);
+    expect(checked.expectedReferences, 4);
+    expect(checked.matchedReferences, 3);
+    expect(checked.missingReferences, 1);
   });
 }

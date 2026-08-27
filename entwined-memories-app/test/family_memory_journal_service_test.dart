@@ -55,6 +55,45 @@ void main() {
     expect(export.generatedAtUtc, DateTime.utc(2026, 8, 21));
   });
 
+  test('writes a current active-post Recovery Catalog without raw media', () async {
+    MethodCall? received;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      received = call;
+      return <String, Object>{
+        'fileName': call.arguments['fileName'] as String,
+        'uri': 'content://example/recovery-catalog',
+      };
+    });
+
+    final catalog = await FamilyMemoryJournalService.writeRecoveryCatalog([
+      Memory(
+        id: 'memory-123',
+        note: 'First steps',
+        date: DateTime.utc(2026, 8, 21),
+        createdBy: 'Dad',
+        mood: '🥰',
+        photos: const [
+          MemoryPhoto(
+            thumbnailUrl: 'https://thumb.example/photo.webp',
+            displayMediaKey: 'display/key.webp',
+          ),
+        ],
+      ),
+    ]);
+
+    expect(received?.method, 'writeRecoveryCatalog');
+    expect(catalog.fileName, startsWith('family_recovery_catalog_'));
+    expect(catalog.memoryCount, 1);
+    final arguments = received?.arguments as Map<Object?, Object?>;
+    final payload = jsonDecode(arguments['json'] as String) as Map<String, dynamic>;
+    expect(payload['schemaVersion'], 1);
+    expect(payload['kind'], 'active-memory-catalog');
+    expect(payload['memories'][0]['id'], 'memory-123');
+    expect(payload['memories'][0]['note'], 'First steps');
+    expect(arguments['json'], isNot(contains('First steps.jpg')));
+  });
+
   test(
     'writes portable JSON event with memory and vault hash metadata',
     () async {

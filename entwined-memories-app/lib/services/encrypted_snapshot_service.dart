@@ -21,8 +21,8 @@ class EncryptedSnapshotProgress {
 }
 
 /// Non-secret file counts shown before an off-site encrypted copy is marked as
-/// complete. Counts let Dad and Mom confirm that originals are in the pack
-/// without exposing filenames, passphrases, or media contents to Firestore.
+/// ready. Journal-only packs intentionally have zero embedded originals because
+/// original photo/video bytes stay in the separately synced Pictures Vault.
 class EncryptedSnapshotCoverage {
   final int photos;
   final int videos;
@@ -53,6 +53,32 @@ class EncryptedSnapshotCoverage {
   }
 }
 
+class OriginalVaultReferenceCheck {
+  final bool vaultSelected;
+  final int expectedReferences;
+  final int matchedReferences;
+  final int missingReferences;
+  final int ambiguousReferences;
+
+  const OriginalVaultReferenceCheck({
+    required this.vaultSelected,
+    required this.expectedReferences,
+    required this.matchedReferences,
+    required this.missingReferences,
+    required this.ambiguousReferences,
+  });
+
+  factory OriginalVaultReferenceCheck.fromMap(Map<Object?, Object?> data) {
+    return OriginalVaultReferenceCheck(
+      vaultSelected: data['vaultSelected'] == true,
+      expectedReferences: (data['expectedReferences'] as num?)?.toInt() ?? 0,
+      matchedReferences: (data['matchedReferences'] as num?)?.toInt() ?? 0,
+      missingReferences: (data['missingReferences'] as num?)?.toInt() ?? 0,
+      ambiguousReferences: (data['ambiguousReferences'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class EncryptedSnapshotVerificationResult {
   final bool verified;
   final String snapshotId;
@@ -78,7 +104,7 @@ class EncryptedSnapshotVerificationResult {
       partCount: (data['partCount'] as num?)?.toInt() ?? 0,
       verifiedAtUtc:
           DateTime.tryParse(data['verifiedAtUtc'] as String? ?? '')?.toUtc() ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 }
@@ -109,7 +135,7 @@ class EncryptedSnapshotRestoreResult {
       restoreFolderUri: data['restoreFolderUri'] as String? ?? '',
       restoredAtUtc:
           DateTime.tryParse(data['restoredAtUtc'] as String? ?? '')?.toUtc() ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 }
@@ -133,7 +159,9 @@ class EncryptedSnapshotResult {
     required this.coverage,
   });
 
-  bool get isCompleteSnapshot => snapshotScope == 'complete';
+  bool get isJournalOnlySnapshot => snapshotScope == 'journal-only';
+
+  bool get isLegacySnapshot => !isJournalOnlySnapshot;
 
   factory EncryptedSnapshotResult.fromMap(Map<Object?, Object?> data) {
     final rawParts = data['parts'];
@@ -146,7 +174,7 @@ class EncryptedSnapshotResult {
           : const <String>[],
       createdAtUtc:
           DateTime.tryParse(data['createdAtUtc'] as String? ?? '')?.toUtc() ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       snapshotScope: data['snapshotScope'] as String? ?? 'legacy-incremental',
       coverage: EncryptedSnapshotCoverage.fromMap(data['coverage']),
     );
@@ -161,10 +189,11 @@ class EncryptedSnapshotService {
 
   static const _channel = MethodChannel('entwined_memories/encrypted_snapshot');
 
-  /// The parent selects exactly `Pictures/Entwined Memories Originals` once on
-  /// each phone. The Android system persists only that folder-tree permission;
-  /// this app never requests broad gallery access or scans other photos.
-  static Future<void> ensureOriginalVaultFolderSelected() async {
+  /// Lets a parent select exactly `Pictures/Entwined Memories Originals` only
+  /// when they want to verify local-original availability after a restore. This
+  /// is separate from Journal-only backup creation and never reads the gallery.
+  static Future<void>
+      ensureOriginalVaultFolderSelectedForRecoveryCheck() async {
     try {
       await _channel.invokeMethod<Object?>('ensureOriginalVaultFolderSelected');
     } on PlatformException catch (error) {
@@ -186,6 +215,26 @@ class EncryptedSnapshotService {
       return null;
     } on MissingPluginException {
       return null;
+    }
+  }
+
+  /// Checks only the selected dedicated Original Vault after archive extraction.
+  /// This uses Journal SHA-256/size references and deterministic vault filenames;
+  /// it does not scan the phone's gallery or read raw media contents.
+  static Future<OriginalVaultReferenceCheck> checkRestoredVaultReferences(
+    String restoreFolderUri,
+  ) async {
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'checkRestoredVaultReferences',
+        <String, Object?>{'restoreFolderUri': restoreFolderUri},
+      );
+      if (result == null) {
+        throw StateError('Original Vault check response မရသေးဘူး။');
+      }
+      return OriginalVaultReferenceCheck.fromMap(result);
+    } on PlatformException catch (error) {
+      throw StateError(error.message ?? 'Original Vault ကိုစစ်မရသေးဘူး။');
     }
   }
 
@@ -230,14 +279,15 @@ class EncryptedSnapshotService {
       }
       return EncryptedSnapshotRestoreResult.fromMap(result);
     } on PlatformException catch (error) {
-      throw StateError(error.message ?? 'Encrypted backup restore မလုပ်နိုင်သေးဘူး။');
+      throw StateError(
+          error.message ?? 'Encrypted backup restore မလုပ်နိုင်သေးဘူး။');
     }
   }
 
-  /// A complete snapshot contains every current Original Vault photo/video and
-  /// the entire Journal/Exports tree. Each output stands alone for a manual
-  /// TeraBox or Telegram recovery, so no earlier incremental chain is needed.
-  static Future<EncryptedSnapshotResult> createCompleteSnapshot({
+  /// A Journal snapshot contains the whole Family Archive tree only. It never
+  /// reads, copies, compresses, or encrypts original photo/video bytes from the
+  /// Pictures Vault; those originals remain protected by Syncthing local copies.
+  static Future<EncryptedSnapshotResult> createJournalSnapshot({
     required String passphrase,
     void Function(EncryptedSnapshotProgress progress)? onProgress,
   }) async {
@@ -256,7 +306,7 @@ class EncryptedSnapshotService {
 
     try {
       final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-        'createCompleteSnapshot',
+        'createJournalSnapshot',
         <String, Object>{'passphrase': passphrase},
       );
       if (result == null) {

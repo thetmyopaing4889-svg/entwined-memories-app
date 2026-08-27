@@ -26,11 +26,48 @@ class FamilyMemoryJournalExport {
       eventCount: (data['eventCount'] as num?)?.toInt() ?? 0,
       generatedAtUtc:
           DateTime.tryParse(data['generatedAtUtc'] as String? ?? '')?.toUtc() ??
-          DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
-      files:
-          rawFiles is List
-              ? rawFiles.whereType<String>().toList(growable: false)
-              : const <String>[],
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      files: rawFiles is List
+          ? rawFiles.whereType<String>().toList(growable: false)
+          : const <String>[],
+    );
+  }
+}
+
+class FamilyRecoveryCatalog {
+  final int memoryCount;
+  final DateTime generatedAtUtc;
+  final String fileName;
+
+  const FamilyRecoveryCatalog({
+    required this.memoryCount,
+    required this.generatedAtUtc,
+    required this.fileName,
+  });
+}
+
+class PreparedFamilyRecoveryCatalog {
+  final String catalogPath;
+  final int memoryCount;
+  final DateTime generatedAtUtc;
+
+  const PreparedFamilyRecoveryCatalog({
+    required this.catalogPath,
+    required this.memoryCount,
+    required this.generatedAtUtc,
+  });
+
+  factory PreparedFamilyRecoveryCatalog.fromMap(Map<Object?, Object?> data) {
+    final catalogPath = data['catalogPath'] as String? ?? '';
+    if (catalogPath.isEmpty) {
+      throw StateError('Prepared Recovery Catalog path မရသေးဘူး။');
+    }
+    return PreparedFamilyRecoveryCatalog(
+      catalogPath: catalogPath,
+      memoryCount: (data['memoryCount'] as num?)?.toInt() ?? 0,
+      generatedAtUtc:
+          DateTime.tryParse(data['generatedAtUtc'] as String? ?? '')?.toUtc() ??
+              DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
     );
   }
 }
@@ -110,6 +147,67 @@ class FamilyMemoryJournalService {
     }
   }
 
+  /// Writes a current active-post catalog before creating an encrypted Journal
+  /// backup. It deliberately contains post metadata only; original media bytes,
+  /// passphrases and account credentials are never placed in the catalog.
+  static Future<FamilyRecoveryCatalog> writeRecoveryCatalog(
+    Iterable<Memory> memories,
+  ) async {
+    final generatedAtUtc = DateTime.now().toUtc();
+    final ordered = List<Memory>.from(memories)
+      ..sort((left, right) => left.id.compareTo(right.id));
+    final payload = <String, Object?>{
+      'schemaVersion': 1,
+      'generatedAtUtc': generatedAtUtc.toIso8601String(),
+      'kind': 'active-memory-catalog',
+      'memories': ordered.map(_memoryMap).toList(growable: false),
+    };
+    final fileName =
+        'family_recovery_catalog_${generatedAtUtc.microsecondsSinceEpoch}.json';
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'writeRecoveryCatalog',
+        <String, Object?>{
+          'fileName': fileName,
+          'json': const JsonEncoder.withIndent('  ').convert(payload),
+        },
+      );
+      final writtenName = result?['fileName'] as String?;
+      if (writtenName == null || writtenName != fileName) {
+        throw StateError('Recovery Catalog file အတည်ပြုချက်မရဘူး။');
+      }
+      return FamilyRecoveryCatalog(
+        memoryCount: ordered.length,
+        generatedAtUtc: generatedAtUtc,
+        fileName: writtenName,
+      );
+    } on PlatformException catch (error) {
+      throw StateError(
+          error.message ?? 'Recovery Catalog ကိုမသိမ်းနိုင်သေးဘူး။');
+    }
+  }
+
+  /// Prepares the latest current-post Recovery Catalog from an already
+  /// cryptographically validated restore folder. This operation does not import
+  /// or modify Firestore; a later explicit user confirmation is required.
+  static Future<PreparedFamilyRecoveryCatalog> prepareRestoredRecoveryCatalog(
+    String restoreFolderUri,
+  ) async {
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'prepareRestoredRecoveryCatalog',
+        <String, Object?>{'restoreFolderUri': restoreFolderUri},
+      );
+      if (result == null) {
+        throw StateError('Restored Recovery Catalog response မရသေးဘူး။');
+      }
+      return PreparedFamilyRecoveryCatalog.fromMap(result);
+    } on PlatformException catch (error) {
+      throw StateError(
+          error.message ?? 'Restored Recovery Catalog ကိုမဖတ်နိုင်သေးဘူး။');
+    }
+  }
+
   /// Creates a portable, human-readable export without modifying or removing
   /// any append-only event file. Parents can copy this export alongside the
   /// Journal Events folder during a future restore drill.
@@ -143,38 +241,37 @@ class FamilyMemoryJournalService {
   }
 
   static Map<String, Object?> _memoryMap(Memory memory) => {
-    'id': memory.id,
-    'dateLocal': _dateOnly(memory.date),
-    'dateUtc': memory.date.toUtc().toIso8601String(),
-    'note': memory.note,
-    'mood': memory.mood,
-    'createdBy': memory.createdBy,
-    'photos': memory.allPhotos
-        .map(
-          (photo) => <String, Object?>{
-            'thumbnailUrl': photo.thumbnailUrl,
-            'imageUrl': photo.imageUrl,
-            'displayMediaKey': photo.displayMediaKey,
-            'mediaProviderVersion': photo.mediaProviderVersion,
-            'imagePublicId': photo.imagePublicId,
-          },
-        )
-        .toList(growable: false),
-    'video':
-        memory.hasVideo
+        'id': memory.id,
+        'dateLocal': _dateOnly(memory.date),
+        'dateUtc': memory.date.toUtc().toIso8601String(),
+        'note': memory.note,
+        'mood': memory.mood,
+        'createdBy': memory.createdBy,
+        'photos': memory.allPhotos
+            .map(
+              (photo) => <String, Object?>{
+                'thumbnailUrl': photo.thumbnailUrl,
+                'imageUrl': photo.imageUrl,
+                'displayMediaKey': photo.displayMediaKey,
+                'mediaProviderVersion': photo.mediaProviderVersion,
+                'imagePublicId': photo.imagePublicId,
+              },
+            )
+            .toList(growable: false),
+        'video': memory.hasVideo
             ? <String, Object?>{
-              'youtubeVideoId': memory.videoId,
-              'processingStatus': memory.processingStatus,
-            }
+                'youtubeVideoId': memory.videoId,
+                'processingStatus': memory.processingStatus,
+              }
             : null,
-  };
+      };
 
   static Map<String, Object?> _vaultMap(OriginalVaultArchive archive) => {
-    'uri': archive.uri,
-    'sha256': archive.sha256,
-    'bytes': archive.bytes,
-    'alreadyExisted': archive.alreadyExists,
-  };
+        'uri': archive.uri,
+        'sha256': archive.sha256,
+        'bytes': archive.bytes,
+        'alreadyExisted': archive.alreadyExists,
+      };
 
   static String _dateOnly(DateTime date) {
     final local = date.toLocal();

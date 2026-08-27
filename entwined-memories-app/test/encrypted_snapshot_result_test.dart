@@ -21,32 +21,33 @@ void main() {
     expect(result.verifiedAtUtc, DateTime.utc(2026, 8, 25, 1, 2, 3));
   });
 
-  test('parses complete snapshot coverage without exposing filenames or secrets', () {
+  test('parses Journal-only snapshot coverage without exposing secrets', () {
     final result = EncryptedSnapshotResult.fromMap(<Object?, Object?>{
       'created': true,
       'snapshotId': 'snapshot_456',
       'fileCount': 15,
       'parts': <String>['content://example/part001.emb'],
       'createdAtUtc': '2026-08-26T12:00:00.000Z',
-      'snapshotScope': 'complete',
+      'snapshotScope': 'journal-only',
       'coverage': <Object?, Object?>{
-        'photos': 9,
-        'videos': 2,
+        'photos': 0,
+        'videos': 0,
         'journalEvents': 3,
-        'exports': 1,
+        'exports': 2,
         'archivePassphrase': 'must-not-be-read',
       },
     });
 
-    expect(result.isCompleteSnapshot, isTrue);
-    expect(result.coverage.photos, 9);
-    expect(result.coverage.videos, 2);
-    expect(result.coverage.totalOriginalMedia, 11);
+    expect(result.isJournalOnlySnapshot, isTrue);
+    expect(result.isLegacySnapshot, isFalse);
+    expect(result.coverage.photos, 0);
+    expect(result.coverage.videos, 0);
+    expect(result.coverage.totalOriginalMedia, 0);
     expect(result.coverage.journalEvents, 3);
-    expect(result.coverage.exports, 1);
+    expect(result.coverage.exports, 2);
   });
 
-  test('treats an older snapshot response as non-complete', () {
+  test('treats an older snapshot response as not Journal-only', () {
     final result = EncryptedSnapshotResult.fromMap(<Object?, Object?>{
       'created': true,
       'snapshotId': 'snapshot_legacy',
@@ -55,7 +56,8 @@ void main() {
       'createdAtUtc': '2026-08-26T12:00:00.000Z',
     });
 
-    expect(result.isCompleteSnapshot, isFalse);
+    expect(result.isJournalOnlySnapshot, isFalse);
+    expect(result.isLegacySnapshot, isTrue);
     expect(result.coverage.totalOriginalMedia, 0);
   });
 

@@ -7,6 +7,7 @@ import '../services/app_settings.dart';
 import '../services/backup_reminder_service.dart';
 import '../services/memory_service.dart';
 import '../services/family_memory_journal_service.dart';
+import '../services/family_recovery_restore_service.dart';
 import '../services/encrypted_snapshot_service.dart';
 import '../services/crash_diagnostic_service.dart';
 
@@ -25,6 +26,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _creatingEncryptedBackup = false;
   bool _verifyingEncryptedBackup = false;
   bool _restoringEncryptedBackup = false;
+  bool _selectingOriginalVaultForRecoveryCheck = false;
   bool _activatingBackupReminder = false;
   String _encryptedBackupStatus = '';
   BackupHealthStatus _backupHealth = const BackupHealthStatus();
@@ -122,7 +124,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showBackupDiagnostic() async {
-    final diagnostic = await EncryptedSnapshotService.readLatestBackupDiagnostic();
+    final diagnostic =
+        await EncryptedSnapshotService.readLatestBackupDiagnostic();
     if (!mounted) return;
     if (diagnostic == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -305,7 +308,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Dad/Mom ဖုန်းနှစ်လုံးတွင်Syncthing ကကူးထားသမျှပါအပါအဝင် Original photo/video အားလုံး၊ Journal Events နဲ့ Exports ကိုဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ပထမတစ်ခါ folder ၂ ခုကို အစဉ်လိုက်ရွေးရမယ် — (၁) Pictures/Entwined Memories Originals၊ (၂) Documents အကြီး folder။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
+                  'ဒီဖုန်း၏ Family Journal, Export နဲ့ လက်ရှိ timeline post များပြန်တည်ဆောက်ရန် Recovery Catalog ကိုဖုန်းပေါ်မှာ encrypt လုပ်မယ်။ Original photo/video bytes ကိုဒီ .emb ထဲမထည့်ဘူး — အဲဒါတွေက Pictures/Entwined Memories Originals နှင့်Syncthing-Fork ကာကွယ်မှုထဲမှာသီးသန့်ရှိတယ်။ ပထမတစ်ခါ Documents အကြီး folder ကိုရွေးပေးရမယ်။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -353,8 +356,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   return;
                 }
                 if (passphrase != confirmController.text) {
-                  setDialogState(() => validationMessage =
-                      'Passphrase နှစ်ခုမတူပါ။');
+                  setDialogState(
+                      () => validationMessage = 'Passphrase နှစ်ခုမတူပါ။');
                   return;
                 }
                 Navigator.pop(dialogContext, passphrase);
@@ -379,16 +382,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
     try {
       setState(() => _encryptedBackupStatus =
-          '၁/၂ Original Vault ကိုရွေးနေတယ်... Pictures/Entwined Memories Originals ကိုရွေးပါ');
-      await EncryptedSnapshotService.ensureOriginalVaultFolderSelected();
-      if (!mounted) return;
-      setState(() => _encryptedBackupStatus =
-          '၂/၂ Backup သိမ်းမယ့် Documents folder ကိုရွေးနေတယ်... Documents အကြီး folder ကိုရွေးပါ');
+          '၁/၃ Backup သိမ်းမယ့် Documents folder ကိုရွေးနေတယ်... Documents အကြီး folder ကိုရွေးပါ');
       await FamilyMemoryJournalService.ensureArchiveFolderSelected();
       if (!mounted) return;
       setState(() => _encryptedBackupStatus =
-          'Dad/Mom Originals, Journal နဲ့ Exports အားလုံးကိုencrypt လုပ်ရန်ပြင်ဆင်နေတယ်...');
-      final snapshot = await EncryptedSnapshotService.createCompleteSnapshot(
+          '၂/၃ လက်ရှိ timeline post များအတွက် Recovery Catalog နဲ့ Family Archive Export ကိုသိမ်းနေတယ်...');
+      await MemoryService.exportFamilyRecoveryCatalog();
+      await FamilyMemoryJournalService.exportPortableArchive();
+      if (!mounted) return;
+      setState(() => _encryptedBackupStatus =
+          '၃/၃ Journal, Exports နဲ့ Recovery Catalog ကိုencrypt လုပ်နေတယ်...');
+      final snapshot = await EncryptedSnapshotService.createJournalSnapshot(
         passphrase: passphrase,
         onProgress: (progress) {
           if (!mounted) return;
@@ -429,12 +433,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         } catch (_) {
           // The .emb pack has already been created locally. A temporary
           // Firestore failure must not misreport that successful backup.
-          healthSyncWarning = ' · Shared health status ကိုနောက်တစ်ခါ refresh လုပ်ပါ';
+          healthSyncWarning =
+              ' · Shared health status ကိုနောက်တစ်ခါ refresh လုပ်ပါ';
         }
       }
       if (!mounted) return;
       final message = snapshot.created
-          ? 'Complete encrypted backup ပြီးပြီ — ပုံ ${snapshot.coverage.photos} ခု၊ video ${snapshot.coverage.videos} ခု၊ Journal ${snapshot.coverage.journalEvents} ခု၊ Export ${snapshot.coverage.exports} ခု · part ${snapshot.partUris.length} ခုထွက်တယ်${healthSyncWarning ?? ''}'
+          ? 'Journal encrypted backup ပြီးပြီ — Journal ${snapshot.coverage.journalEvents} ခု၊ Export ${snapshot.coverage.exports} ခု · part ${snapshot.partUris.length} ခုထွက်တယ်။ Original photo/video bytes မပါဘဲ Syncthing Vault တွင်သီးသန့်ရှိတယ်${healthSyncWarning ?? ''}'
           : 'Backup ဖန်တီးမရသေးဘူး';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(message),
@@ -462,7 +467,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final typed = _nameController.text.trim();
     if (typed.isNotEmpty) return typed;
     final settings = await MemoryService.loadFamilySettings();
-    return settings.creatorName.trim().isEmpty ? 'Dad/Mom' : settings.creatorName;
+    return settings.creatorName.trim().isEmpty
+        ? 'Dad/Mom'
+        : settings.creatorName;
   }
 
   Future<void> _refreshBackupHealth() async {
@@ -544,8 +551,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (passphrase == null || !mounted) return;
     setState(() => _verifyingEncryptedBackup = true);
     try {
-      final verification =
-          await EncryptedSnapshotService.verifyLatestSnapshot(
+      final verification = await EncryptedSnapshotService.verifyLatestSnapshot(
         passphrase: passphrase,
       );
       final actor = await _backupActorLabel();
@@ -585,20 +591,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (passphrase == null || !mounted) return;
     setState(() => _restoringEncryptedBackup = true);
     try {
-      final restored =
-          await EncryptedSnapshotService.restoreFromSelectedFolder(
+      final restored = await EncryptedSnapshotService.restoreFromSelectedFolder(
         passphrase: passphrase,
       );
-      final actor = await _backupActorLabel();
-      await MemoryService.recordRestoreDrill(
-        restoredAtUtc: restored.restoredAtUtc,
-        restoredBy: actor,
-      );
-      await _refreshBackupHealth();
+      if (!mounted) return;
+      String postRestoreNotice = '';
+      var postRestorePreviewPrepared = false;
+      try {
+        final catalog =
+            await FamilyMemoryJournalService.prepareRestoredRecoveryCatalog(
+          restored.restoreFolderUri,
+        );
+        final preview =
+            await FamilyRecoveryRestoreService.previewPreparedCatalog(
+          catalog.catalogPath,
+        );
+        if (preview.memoryCount != catalog.memoryCount) {
+          throw StateError('Recovery Catalog post count မကိုက်ညီဘူး။');
+        }
+        if (!mounted) return;
+        OriginalVaultReferenceCheck? vaultCheck;
+        try {
+          vaultCheck =
+              await EncryptedSnapshotService.checkRestoredVaultReferences(
+            restored.restoreFolderUri,
+          );
+        } catch (_) {
+          // The timeline metadata preview remains safe and useful even when the
+          // separate local Original Vault is temporarily unavailable for checks.
+        }
+        if (!mounted) return;
+        await _showPostRestorePreview(preview, vaultCheck);
+        postRestorePreviewPrepared = true;
+      } catch (error) {
+        // The cryptographic extraction already succeeded. A legacy pack may not
+        // contain the new Recovery Catalog, so do not misreport it as a failed
+        // restore; explain that automatic timeline import is unavailable.
+        postRestoreNotice =
+            ' · ဒီ archive မှာ Post Restore Catalog မပါသေးလို့ timeline auto restore မလုပ်ရသေးဘူး';
+      }
+      if (postRestorePreviewPrepared) {
+        try {
+          final actor = await _backupActorLabel();
+          await MemoryService.recordRestoreDrill(
+            restoredAtUtc: restored.restoredAtUtc,
+            restoredBy: actor,
+          );
+          await _refreshBackupHealth();
+        } catch (_) {
+          postRestoreNotice +=
+              ' · Shared health status ကိုနောက်တစ်ခါ refresh လုပ်ပါ';
+        }
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-          'Restore ပြီးပြီ — ${restored.fileCount} file ကိုfolder အသစ်ထဲမှာပြန်ထုတ်ထားတယ်',
+          'Restore ပြီးပြီ — ${restored.fileCount} file ကိုfolder အသစ်ထဲမှာပြန်ထုတ်ထားတယ်$postRestoreNotice',
         ),
         backgroundColor: const Color(0xFFE8A0B4),
         behavior: SnackBarBehavior.floating,
@@ -615,12 +663,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _selectOriginalVaultForRecoveryCheck() async {
+    if (_selectingOriginalVaultForRecoveryCheck) return;
+    setState(() => _selectingOriginalVaultForRecoveryCheck = true);
+    try {
+      await EncryptedSnapshotService
+          .ensureOriginalVaultFolderSelectedForRecoveryCheck();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+          'Original Vault ကိုစစ်ရန်ရွေးပြီးပြီ။ Restore အပြီး Timeline Post Preview တွင်match status ကိုကြည့်နိုင်မယ်။',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Original Vault folder ကိုစစ်ရန်ရွေးမရသေးဘူး: $error'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ));
+    } finally {
+      if (mounted) {
+        setState(() => _selectingOriginalVaultForRecoveryCheck = false);
+      }
+    }
+  }
+
+  Future<void> _showPostRestorePreview(
+    FamilyRecoveryPreview preview,
+    OriginalVaultReferenceCheck? vaultCheck,
+  ) async {
+    final confirmed = await _showSettledDialog<bool>(
+      (dialogContext) => AlertDialog(
+        title: const Text('Timeline Post Restore Preview'),
+        content: SingleChildScrollView(
+          child: Text(
+            'Recovery Catalog ထဲက post ${preview.memoryCount} ခုကိုတွေ့တယ်။\n\n'
+            'Date range: ${_formatHealthTime(preview.earliestDate)} မှ ${_formatHealthTime(preview.latestDate)}\n\n'
+            '${_vaultReferenceLine(vaultCheck)}\n\n'
+            'Continue လုပ်လျှင် Firestore ထဲမရှိသေးသော Memory ID များကိုသာထည့်မယ်။ ရှိပြီးသား post ကိုမပြင်၊ မဖျက်၊ မoverwrite ဘူး။ Original photo/video bytes ကိုဒီ action ကမယူဘူး — Syncthing Original Vault သီးသန့်ဖြစ်တယ်။',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Post မပြန်သွင်းသေးဘူး'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Missing Post များပြန်သွင်းမယ်'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final imported =
+          await FamilyRecoveryRestoreService.importMissing(preview);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Timeline Post Restore ပြီးပြီ — အသစ်ထည့် ${imported.inserted} ခု · ရှိပြီးသားမို့မထိဘဲကျော် ${imported.skippedExisting} ခု',
+        ),
+        backgroundColor: const Color(0xFFE8A0B4),
+        behavior: SnackBarBehavior.floating,
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Timeline Post Restore မလုပ်နိုင်သေးဘူး: $error'),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  String _vaultReferenceLine(OriginalVaultReferenceCheck? check) {
+    if (check == null) {
+      return 'Original Vault check: ဒီဖုန်းမှာ အခုစစ်မရသေးဘူး။ Timeline စာသား/ရက်စွဲ restore ကိုတော့ဆက်လုပ်နိုင်တယ်၊ original ပုံ/video ရှိမှုကို Syncthing-Fork မှာသီးသန့်စစ်ပါ။';
+    }
+    if (!check.vaultSelected) {
+      return 'Original Vault check: ဒီဖုန်းမှာ Pictures/Entwined Memories Originals folder ကိုမရွေးရသေးဘူး။ Timeline post metadata ကိုသာ restore လုပ်နိုင်မယ်။';
+    }
+    if (check.expectedReferences == 0) {
+      return 'Original Vault check: ဒီ archive Journal မှာ media identity reference မတွေ့လို့ original file ရှိမှုကိုမအတည်ပြုနိုင်သေးဘူး။';
+    }
+    return 'Original Vault check: reference ${check.expectedReferences} ခုထဲမှ ${check.matchedReferences} ခုကိုက်တယ် · မတွေ့ ${check.missingReferences} ခု · မရှင်းလင်း ${check.ambiguousReferences} ခု။';
+  }
+
   Future<void> _activateSixMonthReminder() async {
     if (_activatingBackupReminder) return;
     final dueAt = _backupHealth.nextHealthCheckDueAtUtc;
     if (dueAt == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Encrypted backup တစ်ခုအောင်မြင်ပြီးမှ ၆ လ reminder သတ်မှတ်လို့ရမယ်။'),
+        content: Text(
+            'Encrypted backup တစ်ခုအောင်မြင်ပြီးမှ ၆ လ reminder သတ်မှတ်လို့ရမယ်။'),
         behavior: SnackBarBehavior.floating,
       ));
       return;
@@ -651,10 +790,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _showOffsiteChecklist({required bool teraBox}) async {
-    if (!_hasCompleteMediaSnapshot) {
+    if (!_hasVerifiedAndRestoredJournalSnapshot) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text(
-          'Photo/video အစစ်ပါတဲ့ Complete Encrypted Backup အသစ်ကိုအရင်လုပ်ပြီး Verify/Restore စစ်ပါ။ အဟောင်း Journal-only snapshot ကိုTeraBox/Telegram မတင်သေးပါ။',
+          'Journal Recovery Catalog ပါသော encrypted .emb အသစ်ကိုအရင်လုပ်ပြီး Verify နဲ့ Restore/Post Preview စစ်ပါ။ Original photo/video ကိုTeraBox/Telegram မတင်ပါနှင့် — Syncthing Original Vault တွင်သီးသန့်ရှိတယ်။',
         ),
         backgroundColor: Colors.orange,
         behavior: SnackBarBehavior.floating,
@@ -662,7 +801,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     var acknowledged = false;
-    final title = teraBox ? 'TeraBox encrypted upload checklist' : 'Dad-only Telegram checklist';
+    final title = teraBox
+        ? 'TeraBox encrypted upload checklist'
+        : 'Dad-only Telegram checklist';
     final completed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -683,7 +824,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onChanged: (value) => setDialogState(
                     () => acknowledged = value ?? false,
                   ),
-                  title: const Text('အထက်ပါအဆင့်များကိုပြီးစီးပြီး encrypted .emb files သာတင်/စစ်ပြီးပြီ'),
+                  title: const Text(
+                      'အထက်ပါအဆင့်များကိုပြီးစီးပြီး encrypted .emb files သာတင်/စစ်ပြီးပြီ'),
                   controlAffinity: ListTileControlAffinity.leading,
                 ),
               ],
@@ -722,7 +864,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _refreshBackupHealth();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Shared Family Backup Health status ကိုupdate လုပ်ပြီးပြီ'),
+        content:
+            Text('Shared Family Backup Health status ကိုupdate လုပ်ပြီးပြီ'),
         behavior: SnackBarBehavior.floating,
       ));
     } catch (error) {
@@ -749,17 +892,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String _snapshotCoverageLine() {
     if (!_backupHealth.hasSnapshot) return 'မဖန်တီးရသေးဘူး';
-    if (_backupHealth.latestSnapshotScope != 'complete') {
-      return 'အဟောင်း snapshot ဖြစ်တယ် — Dad/Mom Originals အားလုံးပါသော Complete Backup အသစ်လုပ်ပါ';
+    if (_backupHealth.latestSnapshotScope != 'journal-only') {
+      return 'အဟောင်း media-inclusive snapshot ဖြစ်တယ် — Family Journal Recovery Catalog ပါသော .emb အသစ်လုပ်ပါ';
     }
-    return 'ပုံ ${_backupHealth.latestSnapshotPhotoCount} ခု · video ${_backupHealth.latestSnapshotVideoCount} ခု · Journal ${_backupHealth.latestSnapshotJournalEventCount} ခု · Export ${_backupHealth.latestSnapshotExportCount} ခု';
+    return 'Journal ${_backupHealth.latestSnapshotJournalEventCount} ခု · Export ${_backupHealth.latestSnapshotExportCount} ခု · Original photo/video bytes ကိုSyncthing Vault တွင်သီးသန့်ထားတယ်';
   }
 
-  bool get _hasCompleteMediaSnapshot =>
-      _backupHealth.latestSnapshotScope == 'complete' &&
-      (_backupHealth.latestSnapshotPhotoCount +
-              _backupHealth.latestSnapshotVideoCount) >
-          0;
+  bool get _hasJournalRecoverySnapshot =>
+      _backupHealth.latestSnapshotScope == 'journal-only' &&
+      _backupHealth.latestSnapshotJournalEventCount > 0 &&
+      _backupHealth.latestSnapshotExportCount > 0;
+
+  bool get _hasVerifiedAndRestoredJournalSnapshot =>
+      _hasJournalRecoverySnapshot &&
+      _backupHealth.latestVerifiedAtUtc != null &&
+      _backupHealth.lastRestoreDrillAtUtc != null;
 
   void _showAbout() {
     showAboutDialog(
@@ -968,7 +1115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     subtitle: Text(
                       _creatingEncryptedBackup
                           ? _encryptedBackupStatus
-                          : 'Dad/Mom Originals အားလုံး (Syncthing ကကူးထားတာပါ) + Journal/Exports ကိုpassword နဲ့သော့ခတ်တဲ့ Complete .emb backup လုပ်မယ်',
+                          : 'Family Journal, Export နဲ့ Timeline Recovery Catalog ကိုpassword နဲ့သော့ခတ်မယ်။ Original ပုံ/video bytes ကိုမထည့်ဘဲ Syncthing Vault တွင်သီးသန့်ကာကွယ်ထားတယ်',
                     ),
                     trailing: _creatingEncryptedBackup
                         ? const SizedBox(
@@ -985,13 +1132,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : _showEncryptedBackupDialog,
                   ),
                 ),
+                const SizedBox(height: 12),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(
+                      Icons.folder_shared_outlined,
+                      color: Color(0xFFE8A0B4),
+                    ),
+                    title: const Text('Original Vault ကို Restore အတွက်စစ်မယ်'),
+                    subtitle: const Text(
+                      'Pictures/Entwined Memories Originals ကိုသာရွေးပါ။ ဒီခလုတ်က ပုံ/video ကို backup .emb ထဲမထည့်ဘူး၊ Syncthing ကူးထားသောမူရင်းဖိုင်များရှိ/မရှိကို Restore Preview တွင်စစ်ဖို့သာဖြစ်တယ်။',
+                    ),
+                    trailing: _selectingOriginalVaultForRecoveryCheck
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFE8A0B4),
+                            ),
+                          )
+                        : const Icon(Icons.chevron_right),
+                    onTap: _selectingOriginalVaultForRecoveryCheck
+                        ? null
+                        : _selectOriginalVaultForRecoveryCheck,
+                  ),
+                ),
                 if (_latestFrameworkDiagnostic != null) ...[
                   Card(
                     color: const Color(0xFFFFF0F2),
                     child: ListTile(
                       leading: const Icon(Icons.bug_report_outlined,
                           color: Colors.deepOrange),
-                      title: const Text('Documents picker diagnostic available'),
+                      title:
+                          const Text('Documents picker diagnostic available'),
                       subtitle: const Text(
                         'ဒီဖုန်းတွင်ဖြစ်ခဲ့သော _dependents assertion stack ကိုသာကြည့်/copy လုပ်နိုင်တယ်။ Photo, video, password, TeraBox/Telegram login ကိုမသိမ်းဘူး။',
                       ),
@@ -1007,7 +1181,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: ListTile(
                       leading: const Icon(Icons.analytics_outlined,
                           color: Colors.deepOrange),
-                      title: const Text('Encrypted backup diagnostic available'),
+                      title:
+                          const Text('Encrypted backup diagnostic available'),
                       subtitle: const Text(
                         'Backup ပိတ်သွားမတိုင်မီနောက်ဆုံးရောက်ခဲ့သောအဆင့်နဲ့ file count/size ကိုသာကြည့်နိုင်တယ်။ Photo/video အမည်၊ content၊ password၊ account အချက်အလက် မပါဘူး။',
                       ),
@@ -1056,7 +1231,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         Text(
                           !_backupHealth.hasSnapshot
-                              ? 'အဆင့် ၁: Complete Encrypted Backup ကိုအရင်လုပ်ပါ။ အဲဒီနောက် Verify → Restore → TeraBox/Telegram အစဉ်လိုက်စစ်မယ်။'
+                              ? 'အဆင့် ၁: Journal Recovery Catalog ပါသော Encrypted .emb ကိုအရင်လုပ်ပါ။ အဲဒီနောက် Verify → Restore/Post Preview → TeraBox/Telegram အစဉ်လိုက်စစ်မယ်။'
                               : backupDue
                                   ? '၆ လ health check အချိန်ရောက်ပြီ — .emb parts, TeraBox, Telegram နဲ့ restore/verify ကိုစစ်ပါ။'
                                   : 'Backup စာရင်းကိုဒီမှာကြည့်ပြီး ၆ လနောက် ${_formatHealthTime(nextDue)} တွင်ပြန်စစ်ပါ။',
@@ -1069,12 +1244,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           title: const Text('Latest encrypted snapshot'),
                           subtitle: Text(_backupHealth.hasSnapshot
                               ? '${_snapshotCoverageLine()}\nစုစုပေါင်း ${_backupHealth.latestSnapshotFileCount} file · ${_backupHealth.latestSnapshotPartCount} part · ${_healthLine(_backupHealth.latestSnapshotCreatedAtUtc, _backupHealth.latestSnapshotCreatedBy)}'
-                              : 'အဆင့် ၁ — Photo/video အစစ် + Journal/Exports ပါသော Complete .emb backup ကိုဖန်တီးပါ'),
+                              : 'အဆင့် ၁ — Journal/Exports + Timeline Recovery Catalog ပါသော .emb backup ကိုဖန်တီးပါ။ Original photo/video ကိုSyncthing Vault တွင်သီးသန့်ကာကွယ်ထားတယ်'),
                         ),
                         ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: const Icon(Icons.verified_user_outlined),
-                          title: const Text('Latest local integrity verification'),
+                          title:
+                              const Text('Latest local integrity verification'),
                           subtitle: Text(
                             _backupHealth.latestVerifiedAtUtc == null
                                 ? 'အဆင့် ၂ — နောက်ဆုံး .emb box မပျက်ဘူးလား၊ passphrase နဲ့ဖွင့်လို့ရလားကိုစစ်ပါ'
@@ -1153,16 +1329,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
-                                : const Icon(Icons.notifications_active_outlined),
-                            label: const Text('ဒီဖုန်းအတွက် ၆ လ Reminder ဖွင့်/Update လုပ်မယ်'),
+                                : const Icon(
+                                    Icons.notifications_active_outlined),
+                            label: const Text(
+                                'ဒီဖုန်းအတွက် ၆ လ Reminder ဖွင့်/Update လုပ်မယ်'),
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           'အဆင့် ၆ — ဒီဖုန်းမှာ၆ လ reminder ဖွင့်ပါ။ Notification မပေါ်လျှင်လည်း Settings ဖွင့်ရာတွင်ဒီ shared due card ကိုမြင်ရမယ်။ Passphrase၊ TeraBox login နဲ့ Telegram login ကိုapp/Firestore ထဲမသိမ်းဘူး။',
-                          style: TextStyle(color: muted, fontSize: 12, height: 1.35),
+                          style: TextStyle(
+                              color: muted, fontSize: 12, height: 1.35),
                         ),
                       ],
                     ),
@@ -1247,20 +1427,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : '$_version · For My Baby 💕',
                   ),
                 ),
-                 const SizedBox(height: 16),
-                 OutlinedButton.icon(
-                   onPressed: _signOut,
-                   icon: const Icon(Icons.logout_rounded),
-                   label: const Text('Sign out'),
-                   style: OutlinedButton.styleFrom(
-                     foregroundColor: const Color(0xFF8B3A52),
-                     side: const BorderSide(color: Color(0xFFFFC6D5)),
-                     padding: const EdgeInsets.symmetric(vertical: 13),
-                     shape: RoundedRectangleBorder(
-                       borderRadius: BorderRadius.circular(14),
-                     ),
-                   ),
-                 ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _signOut,
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Sign out'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF8B3A52),
+                    side: const BorderSide(color: Color(0xFFFFC6D5)),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
               ],
             ),
     );

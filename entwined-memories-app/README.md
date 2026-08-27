@@ -351,23 +351,27 @@ This private installation uses a single shared family account. Firebase, Cloudin
 | Portable export | `Documents/Entwined Memories Archive/Exports/` | CSV, JSON index, README, and integrity manifest. |
 | Encrypted pack output | `Documents/Entwined Memories Archive/Encrypted Backups/` | Client-side encrypted `.emb` parts for manual secondary copies. |
 
-### 22.1 Creating a complete encrypted snapshot
+### 22.1 Creating a Journal-only encrypted snapshot
 
-From **Settings**, choose **Encrypted Backup ဖန်တီးမယ်** whenever the family wants to make an off-site backup. The app asks for an archive passphrase of at least 16 characters and confirms it before beginning. The passphrase is used only for that operation: it is not saved in the app, Android settings, Firebase, TeraBox, Telegram, or the Journal.
+From **Settings**, choose **Encrypted Backup ဖန်တီးမယ်** whenever the family wants to make an off-site recovery copy of the Family Archive. The app asks for an archive passphrase of at least 16 characters and confirms it before beginning. The passphrase is used only for that operation: it is not saved in the app, Android settings, Firebase, TeraBox, Telegram, or the Journal.
 
-On the first complete backup on each phone, Android asks the parent to select exactly `Pictures/Entwined Memories Originals`. The app persists access only to that selected Original Vault tree and its subfolders; it does not request broad gallery access or scan unrelated photos. This includes originals created on that phone and originals copied into the same vault by Syncthing-Fork.
+Before encrypting, the app obtains the current `memories` timeline from Firestore and writes an immutable **Family Recovery Catalog** into `Exports`. That catalog includes each active post's stable ID, date, text, mood, creator, display-provider metadata, gallery fields, and video fields. It contains no raw original media bytes, passphrase, or account credentials. The app also writes the normal human-readable Family Archive Export (CSV, README, index, and integrity manifest). If a current server-backed catalog cannot be created, the encrypted snapshot fails safely rather than labelling stale data as the latest recovery point.
 
-Every snapshot is intentionally **standalone and complete**: it packages all current Original Vault photos and videos plus the complete Journal Events and Exports tree. This avoids a fragile incremental chain when parents manually upload to TeraBox or Dad-only Telegram. The app shows photo, video, Journal, and Export counts before an off-site copy can be marked complete.
+Every Journal snapshot is intentionally **standalone**: it packages the whole Journal Events and Exports tree, including the current Recovery Catalog. It does **not** read, copy, compress, or encrypt Original Vault photos or videos. Original-resolution media stays separately in `Pictures/Entwined Memories Originals` and is protected by Dad/Mom Syncthing-Fork copies. This avoids repeatedly processing and manually uploading very large original media packs.
 
-It encrypts the ZIP stream with **AES-256-GCM** and derives its encryption key through **PBKDF2** with a random salt. Every archive file has a SHA-256 entry in the encrypted snapshot manifest. Very large snapshots are split into `.emb` parts named like `snapshot_..._part001.emb`, `snapshot_..._part002.emb`, and so on.
+It encrypts the archive stream with **AES-256-GCM** and derives its encryption key through **PBKDF2** with a random salt. Every archive file has a SHA-256 entry in the encrypted snapshot manifest. Large Journal archives are split into `.emb` parts named like `snapshot_..._part001.emb`, `snapshot_..._part002.emb`, and so on.
 
-> **Recovery rule:** Every `.emb` part with the same `snapshot_...` ID is required. Keep their exact file names, keep them together, and never upload, download, or restore only one part from a multi-part snapshot. The newest verified complete snapshot can be restored by itself; no older snapshot chain is required.
+> **Recovery rule:** Every `.emb` part with the same `snapshot_...` ID is required. Keep their exact file names, keep them together, and never upload, download, or restore only one part from a multi-part snapshot. The newest verified Journal snapshot can be restored by itself; no earlier snapshot chain is required.
 
-### 22.2 Verify and restore before trusting an off-site copy
+### 22.2 Verify, restore, and rebuild dated posts before trusting an off-site copy
 
-Use **Verify Latest Encrypted Backup** in Settings to decrypt and inspect the latest local complete snapshot. The app validates the AES-GCM authentication tag and verifies every file's SHA-256 value against the encrypted manifest. A wrong passphrase, missing part, altered part, or corrupt manifest must be treated as a failed verification.
+Use **Verify Latest Encrypted Backup** in Settings to decrypt and inspect the latest local Journal snapshot. The app validates the AES-GCM authentication tag and verifies every file's SHA-256 value against the encrypted manifest. A wrong passphrase, missing part, altered part, or corrupt manifest must be treated as a failed verification.
 
-Use **Restore encrypted .emb files** for a recovery drill or when restoring downloaded parts. First select the folder containing all `.emb` parts from one snapshot, then select a separate empty or new destination folder. The app creates a new `Entwined Memories Restore snapshot_...` folder and does not overwrite an existing restore folder or file. If authentication or manifest validation fails, the newly-created restore snapshot folder is removed. The restore feature writes recovered files into a safe restore destination; it does not automatically re-import them into the app timeline or overwrite the Original Vault.
+Use **Restore encrypted .emb files** for a recovery drill or when restoring downloaded parts. First select the folder containing all `.emb` parts from one snapshot, then select a separate empty or new destination folder. The app creates a new `Entwined Memories Restore snapshot_...` folder and does not overwrite an existing restore folder or file. If authentication or manifest validation fails, the newly-created restore snapshot folder is removed.
+
+After an authenticated extraction, the app prepares the newest Recovery Catalog and shows a **Timeline Post Restore Preview** with post count and date range. The parent must explicitly confirm before import. Import writes only missing stable IDs to the unchanged Firestore `memories` collection; it never overwrites, edits, or deletes an existing Memory. A repeated import therefore safely skips existing posts. The app can also check Journal hash/byte references against deterministic `EMP_`/`EMV_` files within the separately selected Original Vault. It never scans the general gallery and never claims a media match when the local Vault is missing or ambiguous.
+
+A Journal-only `.emb` can reconstruct dated post metadata and history. It cannot recreate raw original photo/video bytes; those bytes must separately arrive on the phone through the Syncthing Original Vault or another local copy. If a cloud display provider is unavailable, a restored post may have metadata while its provider-hosted display media remains unavailable.
 
 ### 22.3 Manual TeraBox and Dad-only Telegram copies
 
@@ -382,7 +386,7 @@ Keep the passphrase and recovery instructions on paper in a safe place known to 
 
 ### 22.4 Six-month health check
 
-The **Family Backup Health** card in Settings is shared through `app_data/settings.backupHealth`, so Dad and Mom can see the latest snapshot's photo/video/Journal/Export counts, local verification, restore drill, TeraBox check, and Telegram check. It does not contain secrets. Completing a new encrypted snapshot clears checks that applied to the older snapshot and sets the next check six calendar months later.
+The **Family Backup Health** card in Settings is shared through `app_data/settings.backupHealth`, so Dad and Mom can see the latest Journal snapshot's Journal/Export counts, local verification, recovery-catalog restore preview, TeraBox check, and Telegram check. It does not contain secrets. The card explicitly explains that original photo/video bytes are kept in the separate Syncthing Original Vault. Completing a new encrypted snapshot clears checks that applied to the older snapshot and sets the next check six calendar months later.
 
 Each phone can enable its own Android local reminder using **ဒီဖုန်းအတွက် ၆ လ Reminder ဖွင့်/Update လုပ်မယ်**. Notification permission is requested only from that explicit action. Android manufacturers may delay background alarms, so the in-app due card remains the required fallback; opening Settings shows the due state even if a phone notification was delayed.
 

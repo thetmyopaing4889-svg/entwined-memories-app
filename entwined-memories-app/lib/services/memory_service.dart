@@ -45,6 +45,18 @@ class MemoryService {
         .map((snap) => snap.docs.map(Memory.fromFirestore).toList());
   }
 
+  /// Creates a current recovery catalog from the authoritative Firestore
+  /// timeline before a Journal-only encrypted snapshot. Requiring the server
+  /// prevents a stale offline cache from being labelled as the latest recovery
+  /// point; the operation fails safely when a current catalog cannot be made.
+  static Future<FamilyRecoveryCatalog> exportFamilyRecoveryCatalog() async {
+    final snapshot =
+        await _col.orderBy('date').get(const GetOptions(source: Source.server));
+    final memories =
+        snapshot.docs.map(Memory.fromFirestore).toList(growable: false);
+    return FamilyMemoryJournalService.writeRecoveryCatalog(memories);
+  }
+
   // ── CRUD ─────────────────────────────────────────────────────────────────
 
   /// Writes a local journal intent before Firestore. If the online save later

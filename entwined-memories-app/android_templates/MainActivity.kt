@@ -448,9 +448,17 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun ensureJournalFolderSelected(result: MethodChannel.Result) {
-        if (journalTreeUri() != null) {
-            result.success(mapOf("configured" to true))
-            return
+        val selectedTree = journalTreeUri()
+        if (selectedTree != null) {
+            // A previous app version asked for this picker before Original Vault.
+            // Keep only the intended Documents root so a mistakenly selected media
+            // folder cannot later be reused as the journal/output location.
+            val selectedName = runCatching { selectedTreeDisplayName(selectedTree) }.getOrNull()
+            if (selectedName == "Documents") {
+                result.success(mapOf("configured" to true))
+                return
+            }
+            journalPreferences().edit().remove(JOURNAL_TREE_URI_KEY).apply()
         }
         if (pendingJournalFolderResult != null) {
             result.error("journal_folder_busy", "Family Memory Journal folder picker is already open.", null)
@@ -533,16 +541,20 @@ class MainActivity : FlutterActivity() {
         deliverPendingOriginalVaultFolderCompletionWhenSafe()
     }
 
+    private fun selectedTreeDisplayName(treeUri: Uri): String? {
+        val root = treeDocumentUri(treeUri)
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        return contentResolver.query(root, projection, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }
+
     private fun validateOriginalVaultTree(treeUri: Uri): String {
         // This runs only after DocumentsUI has completely returned to the host
         // Activity. Some providers use volume-specific document IDs, so verify the
         // provider's actual display name rather than assuming a device-ID format.
-        val root = treeDocumentUri(treeUri)
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
         val displayName = try {
-            contentResolver.query(root, projection, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getString(0) else null
-            }
+            selectedTreeDisplayName(treeUri)
         } catch (error: Exception) {
             throw IllegalStateException(
                 "Android could not inspect the selected Original Vault folder after the picker closed (${error.javaClass.simpleName}).",

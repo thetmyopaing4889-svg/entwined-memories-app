@@ -254,7 +254,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Dad/Mom ဖုန်းနှစ်လုံးတွင်Syncthing ကကူးထားသမျှပါအပါအဝင် Original photo/video အားလုံး၊ Journal Events နဲ့ Exports ကိုဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ပထမတစ်ခါမှာ Pictures/Entwined Memories Originals folder ကိုရွေးပေးရမယ်။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
+                  'Dad/Mom ဖုန်းနှစ်လုံးတွင်Syncthing ကကူးထားသမျှပါအပါအဝင် Original photo/video အားလုံး၊ Journal Events နဲ့ Exports ကိုဖုန်းပေါ်မှာအရင် encrypt လုပ်မယ်။ ပထမတစ်ခါ folder ၂ ခုကို အစဉ်လိုက်ရွေးရမယ် — (၁) Pictures/Entwined Memories Originals၊ (၂) Documents အကြီး folder။ ဒီ password ကို app, Firebase, TeraBox, Telegram မှာမသိမ်းဘူး။',
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -327,11 +327,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _encryptedBackupStatus = 'Encrypted backup ကိုပြင်ဆင်နေတယ်...';
     });
     try {
-      await FamilyMemoryJournalService.ensureArchiveFolderSelected();
+      setState(() => _encryptedBackupStatus =
+          '၁/၂ Original Vault ကိုရွေးနေတယ်... Pictures/Entwined Memories Originals ကိုရွေးပါ');
+      await EncryptedSnapshotService.ensureOriginalVaultFolderSelected();
       if (!mounted) return;
       setState(() => _encryptedBackupStatus =
-          'Original Vault folder ကိုစစ်နေတယ်... ပထမတစ်ခါဆို Pictures/Entwined Memories Originals ကိုရွေးပါ');
-      await EncryptedSnapshotService.ensureOriginalVaultFolderSelected();
+          '၂/၂ Backup သိမ်းမယ့် Documents folder ကိုရွေးနေတယ်... Documents အကြီး folder ကိုရွေးပါ');
+      await FamilyMemoryJournalService.ensureArchiveFolderSelected();
       if (!mounted) return;
       setState(() => _encryptedBackupStatus =
           'Dad/Mom Originals, Journal နဲ့ Exports အားလုံးကိုencrypt လုပ်ရန်ပြင်ဆင်နေတယ်...');

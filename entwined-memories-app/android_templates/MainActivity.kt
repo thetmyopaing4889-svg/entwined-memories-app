@@ -65,6 +65,7 @@ class MainActivity : FlutterActivity() {
         private const val SNAPSHOT_CHANNEL = "entwined_memories/encrypted_snapshot"
         private const val DIAGNOSTIC_CHANNEL = "entwined_memories/crash_diagnostics"
         private const val DIAGNOSTIC_FILE_NAME = "latest_flutter_framework_diagnostic.txt"
+        private const val BACKUP_DIAGNOSTIC_FILE_NAME = "latest_encrypted_backup_diagnostic.txt"
         private const val SNAPSHOT_PREFERENCES = "encrypted_snapshot"
         private const val SNAPSHOT_CURSOR_KEY = "last_completed_snapshot_utc_millis"
         private const val SNAPSHOT_LAST_ID_KEY = "last_completed_snapshot_id"
@@ -134,6 +135,7 @@ class MainActivity : FlutterActivity() {
                 "isOriginalVaultFolderSelected" -> result.success(originalVaultTreeUri() != null)
                 "ensureOriginalVaultFolderSelected" -> ensureOriginalVaultFolderSelected(result)
                 "createCompleteSnapshot" -> createCompleteSnapshot(call, result)
+                "readLatestBackupDiagnostic" -> readLatestBackupDiagnostic(result)
                 "verifyLatestSnapshot" -> verifyLatestSnapshot(call, result)
                 "restoreSnapshotFromSelectedFolder" -> restoreSnapshotFromSelectedFolder(call, result)
                 else -> result.notImplemented()
@@ -191,6 +193,38 @@ class MainActivity : FlutterActivity() {
 
     private fun truncateDiagnostic(value: String, limit: Int): String {
         return if (value.length <= limit) value else value.take(limit) + "\n[truncated]"
+    }
+
+    /**
+     * Records only backup execution stages and numeric counts in app-private
+     * storage. It never records media names, paths, content, passphrases, or
+     * remote-account details. A successful backup clears this temporary record.
+     */
+    private fun recordBackupDiagnostic(stage: String, details: Map<String, Any> = emptyMap()) {
+        runCatching {
+            val body = buildString {
+                appendLine("Entwined Memories encrypted-backup diagnostic")
+                appendLine("recordedAtUtc: ${utcTimestamp()}")
+                appendLine("stage: ${truncateDiagnostic(stage, 120)}")
+                details.toSortedMap().forEach { (key, value) ->
+                    appendLine("${truncateDiagnostic(key, 80)}: ${truncateDiagnostic(value.toString(), 80)}")
+                }
+            }
+            File(filesDir, BACKUP_DIAGNOSTIC_FILE_NAME).writeText(body, Charsets.UTF_8)
+        }
+    }
+
+    private fun clearBackupDiagnostic() {
+        runCatching { File(filesDir, BACKUP_DIAGNOSTIC_FILE_NAME).delete() }
+    }
+
+    private fun readLatestBackupDiagnostic(result: MethodChannel.Result) {
+        try {
+            val file = File(filesDir, BACKUP_DIAGNOSTIC_FILE_NAME)
+            result.success(if (file.exists()) file.readText(Charsets.UTF_8) else null)
+        } catch (error: Exception) {
+            result.error("backup_diagnostic_read_failed", error.message, null)
+        }
     }
 
     override fun onPostResume() {
@@ -962,11 +996,17 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             return
         }
 
+        clearBackupDiagnostic()
+        recordBackupDiagnostic("backup_request_accepted")
         vaultExecutor.execute {
             try {
                 val snapshot = buildCompleteSnapshot(journalUri, originalVaultUri, passphrase)
                 mainHandler.post { result.success(snapshot) }
             } catch (error: Exception) {
+                recordBackupDiagnostic(
+                    "backup_exception_caught",
+                    mapOf("exceptionType" to error.javaClass.simpleName),
+                )
                 mainHandler.post { result.error("snapshot_failed", error.message, null) }
             }
         }
@@ -981,8 +1021,21 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         originalVaultUri: Uri,
         passphrase: String,
     ): Map<String, Any> {
+        recordBackupDiagnostic("collecting_backup_inputs")
         val inputs = collectCompleteSnapshotInputs(journalUri, originalVaultUri)
         val coverage = snapshotCoverage(inputs)
+        val inputBytes = inputs.fold(0L) { total, input -> total + input.bytes }
+        recordBackupDiagnostic(
+            "backup_inputs_collected",
+            mapOf(
+                "totalFiles" to inputs.size,
+                "totalBytes" to inputBytes,
+                "photos" to (coverage["photos"] ?: 0),
+                "videos" to (coverage["videos"] ?: 0),
+                "journalEvents" to (coverage["journalEvents"] ?: 0),
+                "exports" to (coverage["exports"] ?: 0),
+            ),
+        )
         if ((coverage["photos"] ?: 0) + (coverage["videos"] ?: 0) == 0) {
             throw IllegalStateException(
                 "No Original Vault photo or video was found. Select Pictures/Entwined Memories Originals and confirm that it contains your family originals before backing up.",
@@ -1021,9 +1074,13 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
                 CipherOutputStream(header, cipher).use { encrypted ->
                     ZipOutputStream(BufferedOutputStream(encrypted)).use { zip ->
                         inputs.forEachIndexed { index, input ->
-                            writeSnapshotInput(zip, input, digests)
+                            writeSnapshotInput(zip, input, digests, index + 1, inputs.size)
                             notifySnapshotProgress(index + 1, inputs.size, input.archivePath)
                         }
+                        recordBackupDiagnostic(
+                            "writing_snapshot_manifest",
+                            mapOf("totalFiles" to inputs.size),
+                        )
                         val manifest = JSONObject().apply {
                             put("schemaVersion", 1)
                             put("snapshotId", snapshotId)
@@ -1056,6 +1113,7 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             snapshotPreferences().edit()
                 .putString(SNAPSHOT_LAST_ID_KEY, snapshotId)
                 .apply()
+            clearBackupDiagnostic()
             return mapOf(
                 "created" to true,
                 "snapshotId" to snapshotId,
@@ -1229,7 +1287,18 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
         zip: ZipOutputStream,
         input: SnapshotInput,
         digests: MutableList<SnapshotDigest>,
+        position: Int,
+        total: Int,
     ) {
+        recordBackupDiagnostic(
+            "writing_backup_input",
+            mapOf(
+                "position" to position,
+                "totalFiles" to total,
+                "category" to snapshotInputCategory(input.archivePath),
+                "expectedBytes" to input.bytes,
+            ),
+        )
         zip.putNextEntry(ZipEntry(input.archivePath))
         val digest = MessageDigest.getInstance("SHA-256")
         var copied = 0L
@@ -1249,6 +1318,23 @@ Open a recent CSV in any spreadsheet application, open a recent JSON file in a t
             bytes = copied,
             sha256 = digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) },
         )
+        recordBackupDiagnostic(
+            "backup_input_written",
+            mapOf(
+                "position" to position,
+                "totalFiles" to total,
+                "category" to snapshotInputCategory(input.archivePath),
+                "writtenBytes" to copied,
+            ),
+        )
+    }
+
+    private fun snapshotInputCategory(archivePath: String): String = when {
+        archivePath.startsWith("original-media/photos/") -> "photo"
+        archivePath.startsWith("original-media/videos/") -> "video"
+        archivePath.startsWith("family-memory-journal/Journal Events/") -> "journal"
+        archivePath.startsWith("family-memory-journal/Exports/") -> "export"
+        else -> "other"
     }
 
     private fun notifySnapshotProgress(completed: Int, total: Int, currentPath: String) {

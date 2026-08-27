@@ -174,6 +174,21 @@ class EncryptedSnapshotService {
     }
   }
 
+  /// Returns the last native backup stage after an unexpected close. The native
+  /// record contains only stage names and numeric counts; it never contains
+  /// media names, paths, content, passphrases, or remote-account information.
+  static Future<String?> readLatestBackupDiagnostic() async {
+    try {
+      final value =
+          await _channel.invokeMethod<String>('readLatestBackupDiagnostic');
+      return value?.trim().isEmpty ?? true ? null : value;
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   static Future<EncryptedSnapshotVerificationResult> verifyLatestSnapshot({
     required String passphrase,
   }) async {

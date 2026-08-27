@@ -38,6 +38,21 @@ void main() {
     expect(received?.method, 'ensureOriginalVaultFolderSelected');
   });
 
+  test('reads a privacy-safe native backup diagnostic when available', () async {
+    MethodCall? received;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          received = call;
+          return 'stage: writing_backup_input\\nposition: 9\\ntotalFiles: 9';
+        });
+
+    final diagnostic = await EncryptedSnapshotService.readLatestBackupDiagnostic();
+
+    expect(received?.method, 'readLatestBackupDiagnostic');
+    expect(diagnostic, contains('writing_backup_input'));
+    expect(diagnostic, contains('totalFiles: 9'));
+  });
+
   test('parses a complete originals-inclusive snapshot result', () async {
     MethodCall? received;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

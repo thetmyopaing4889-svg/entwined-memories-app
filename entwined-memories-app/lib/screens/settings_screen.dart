@@ -33,6 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   ThemeMode _themeMode = ThemeMode.light;
   AppLanguage _language = AppLanguage.myanmar;
   String? _latestFrameworkDiagnostic;
+  String? _latestBackupDiagnostic;
 
   @override
   void initState() {
@@ -43,6 +44,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final familySettings = await MemoryService.loadFamilySettings();
     final diagnostic = await CrashDiagnosticService.readLatest();
+    final backupDiagnostic =
+        await EncryptedSnapshotService.readLatestBackupDiagnostic();
     String version = '';
     try {
       final info = await PackageInfo.fromPlatform();
@@ -60,6 +63,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _themeMode = settings.themeMode;
       _language = settings.language;
       _latestFrameworkDiagnostic = diagnostic;
+      _latestBackupDiagnostic = backupDiagnostic;
       _loading = false;
     });
   }
@@ -102,6 +106,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                   content: Text('Diagnostic stack ကိုcopy လုပ်ပြီးပြီ'),
+                  behavior: SnackBarBehavior.floating,
+                ));
+              }
+            },
+            child: const Text('Copy diagnostic'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showBackupDiagnostic() async {
+    final diagnostic = await EncryptedSnapshotService.readLatestBackupDiagnostic();
+    if (!mounted) return;
+    if (diagnostic == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Encrypted backup diagnostic ကိုမတွေ့သေးဘူး'),
+        behavior: SnackBarBehavior.floating,
+      ));
+      return;
+    }
+    setState(() => _latestBackupDiagnostic = diagnostic);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Encrypted backup diagnostic'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              diagnostic,
+              style: const TextStyle(fontSize: 12, height: 1.35),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: diagnostic));
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Diagnostic ကိုcopy လုပ်ပြီးပြီ'),
                   behavior: SnackBarBehavior.floating,
                 ));
               }
@@ -946,6 +997,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: _showFrameworkDiagnostic,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_latestBackupDiagnostic != null) ...[
+                  Card(
+                    color: const Color(0xFFFFF0F2),
+                    child: ListTile(
+                      leading: const Icon(Icons.analytics_outlined,
+                          color: Colors.deepOrange),
+                      title: const Text('Encrypted backup diagnostic available'),
+                      subtitle: const Text(
+                        'Backup ပိတ်သွားမတိုင်မီနောက်ဆုံးရောက်ခဲ့သောအဆင့်နဲ့ file count/size ကိုသာကြည့်နိုင်တယ်။ Photo/video အမည်၊ content၊ password၊ account အချက်အလက် မပါဘူး။',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _showBackupDiagnostic,
                     ),
                   ),
                   const SizedBox(height: 12),

@@ -516,8 +516,12 @@ class MainActivity : FlutterActivity() {
             return
         }
         try {
-            takeTreePermission(treeUri, data.flags)
+            // Do not query the DocumentsProvider while its picker Activity is still
+            // closing. Some Android implementations can terminate the calling app
+            // during that transition. The selected tree document ID is already in
+            // the returned URI, so validate it without any provider I/O first.
             validateOriginalVaultTree(treeUri)
+            takeTreePermission(treeUri, data.flags)
             originalVaultPreferences().edit().putString(ORIGINAL_VAULT_TREE_URI_KEY, treeUri.toString()).apply()
             pendingOriginalVaultFolderCompletion = PendingJournalFolderCompletion(
                 result = pendingResult,
@@ -534,12 +538,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun validateOriginalVaultTree(treeUri: Uri) {
-        val root = treeDocumentUri(treeUri)
-        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-        val displayName = contentResolver.query(root, projection, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
-        }
-        if (displayName != "Entwined Memories Originals") {
+        // ACTION_OPEN_DOCUMENT_TREE returns the selected directory in the tree
+        // document ID. Checking the exact final path keeps the archive scope narrow
+        // without reopening the provider while DocumentsUI is still unwinding.
+        val documentId = DocumentsContract.getTreeDocumentId(treeUri).trimEnd('/')
+        val expectedSuffix = ":$VAULT_ROOT"
+        if (!documentId.endsWith(expectedSuffix) || documentId.length <= expectedSuffix.length) {
             throw IllegalArgumentException(
                 "Select the Entwined Memories Originals folder itself, not Pictures or another folder.",
             )
